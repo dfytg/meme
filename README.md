@@ -1,2 +1,3 @@
 # meme
-Long term memory.
+
+Long term memory for AI agents.
