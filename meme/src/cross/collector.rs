@@ -258,7 +258,8 @@ fn truncate(text: &str, max_len: usize) -> String {
     if text.len() <= max_len {
         text.to_owned()
     } else {
-        format!("{}...", &text[..max_len])
+        let boundary = text.floor_char_boundary(max_len);
+        format!("{}...", &text[..boundary])
     }
 }
 

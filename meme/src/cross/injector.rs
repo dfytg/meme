@@ -44,14 +44,14 @@ impl<'a> ContextInjector<'a> {
         project: &str,
         _user_prompt: Option<&str>,
     ) -> Result<ContextBundle> {
-        let mut budget_remaining = self.max_tokens;
+        let mut _budget_remaining = self.max_tokens;
         let mut total_tokens = 0usize;
 
         // Tier 1: Session summaries (highest priority).
         let raw_summaries = self.db.get_recent_summaries(project, 5)?;
         let (summaries, tokens_used) =
-            budget_items(&raw_summaries, text_for_summary, budget_remaining);
-        budget_remaining -= tokens_used;
+            budget_items(&raw_summaries, text_for_summary, _budget_remaining);
+        _budget_remaining -= tokens_used;
         total_tokens += tokens_used;
         tracing::debug!(
             packed = summaries.len(),
@@ -63,8 +63,8 @@ impl<'a> ContextInjector<'a> {
         // Tier 2: Observations.
         let raw_observations = self.db.get_recent_observations(project, 20)?;
         let (observations, tokens_used) =
-            budget_items(&raw_observations, text_for_observation, budget_remaining);
-        let _ = budget_remaining - tokens_used;
+            budget_items(&raw_observations, text_for_observation, _budget_remaining);
+        _budget_remaining -= tokens_used;
         total_tokens += tokens_used;
         tracing::debug!(
             packed = observations.len(),

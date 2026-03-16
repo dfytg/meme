@@ -119,7 +119,8 @@ impl SessionCmd {
                                 .as_deref()
                                 .map(|p| {
                                     if p.len() > 50 {
-                                        format!("{}...", &p[..47])
+                                        let boundary = p.floor_char_boundary(47);
+                                        format!("{}...", &p[..boundary])
                                     } else {
                                         p.to_owned()
                                     }

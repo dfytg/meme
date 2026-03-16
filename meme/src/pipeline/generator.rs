@@ -48,29 +48,24 @@ impl AnswerGenerator {
             json_mode: false,
         };
 
-        let max_retries = 3;
-        for attempt in 0..max_retries {
-            match self.llm.chat(&messages, &opts).await {
-                Ok(response) => match extract_json_from_text(&response) {
-                    Ok(result) => {
-                        return Ok(result["answer"]
-                            .as_str()
-                            .unwrap_or(response.trim())
-                            .to_owned());
-                    }
-                    Err(e) => {
-                        if attempt + 1 < max_retries {
-                            tracing::warn!(attempt = attempt + 1, error = %e, "answer parse failed, retrying");
-                        } else {
-                            return Ok(response.trim().to_owned());
-                        }
-                    }
-                },
+        let parse_retries = 2;
+        for attempt in 0..=parse_retries {
+            let response = match self.llm.chat(&messages, &opts).await {
+                Ok(r) => r,
+                Err(e) => return Err(e),
+            };
+            match extract_json_from_text(&response) {
+                Ok(result) => {
+                    return Ok(result["answer"]
+                        .as_str()
+                        .unwrap_or(response.trim())
+                        .to_owned());
+                }
                 Err(e) => {
-                    if attempt + 1 < max_retries {
-                        tracing::warn!(attempt = attempt + 1, error = %e, "answer generation failed, retrying");
+                    if attempt < parse_retries {
+                        tracing::warn!(attempt = attempt + 1, error = %e, "answer parse failed, retrying LLM");
                     } else {
-                        return Err(e);
+                        return Ok(response.trim().to_owned());
                     }
                 }
             }

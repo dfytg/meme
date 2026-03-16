@@ -225,6 +225,12 @@ fn join_delimited(items: &[String]) -> String {
     items.join("||")
 }
 
+fn escape_like(s: &str) -> String {
+    s.replace('\'', "''")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 #[async_trait::async_trait]
 impl VectorStore for LanceDbStore {
     async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()> {
@@ -390,7 +396,7 @@ impl VectorStore for LanceDbStore {
         let conditions: Vec<String> = keywords
             .iter()
             .map(|kw| {
-                let safe = kw.replace('\'', "''");
+                let safe = escape_like(kw);
                 format!("(restatement LIKE '%{safe}%' OR keywords_text LIKE '%{safe}%')")
             })
             .collect();
@@ -440,7 +446,7 @@ impl VectorStore for LanceDbStore {
         if let Some(persons) = &filter.persons {
             let conds: Vec<String> = persons
                 .iter()
-                .map(|p| format!("persons_text LIKE '%{}%'", p.replace('\'', "''")))
+                .map(|p| format!("persons_text LIKE '%{}%'", escape_like(p)))
                 .collect();
             if !conds.is_empty() {
                 conditions.push(format!("({})", conds.join(" OR ")));
@@ -448,16 +454,13 @@ impl VectorStore for LanceDbStore {
         }
 
         if let Some(location) = &filter.location {
-            conditions.push(format!(
-                "location LIKE '%{}%'",
-                location.replace('\'', "''")
-            ));
+            conditions.push(format!("location LIKE '%{}%'", escape_like(location)));
         }
 
         if let Some(entities) = &filter.entities {
             let conds: Vec<String> = entities
                 .iter()
-                .map(|e| format!("entities_text LIKE '%{}%'", e.replace('\'', "''")))
+                .map(|e| format!("entities_text LIKE '%{}%'", escape_like(e)))
                 .collect();
             if !conds.is_empty() {
                 conditions.push(format!("({})", conds.join(" OR ")));

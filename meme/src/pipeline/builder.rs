@@ -244,25 +244,24 @@ async fn generate_entries_standalone(
         json_mode: false,
     };
 
-    let max_retries = 3;
+    let parse_retries = 2;
     let mut last_err = None;
-    for attempt in 0..max_retries {
-        match llm.chat(&messages, &opts).await {
-            Ok(response) => match parse_entries_response(&response) {
-                Ok(entries) => return Ok(entries),
-                Err(e) => {
-                    tracing::warn!(attempt = attempt + 1, error = %e, "parse failed");
-                    last_err = Some(e);
-                }
-            },
+    for attempt in 0..=parse_retries {
+        let response = match llm.chat(&messages, &opts).await {
+            Ok(r) => r,
+            Err(e) => return Err(e),
+        };
+        match parse_entries_response(&response) {
+            Ok(entries) => return Ok(entries),
             Err(e) => {
-                tracing::warn!(attempt = attempt + 1, error = %e, "LLM call failed");
+                tracing::warn!(attempt = attempt + 1, error = %e, "parse failed, retrying LLM");
                 last_err = Some(e);
             }
         }
     }
 
-    Err(last_err.unwrap_or_else(|| Error::Internal("extraction retries exhausted".to_owned())))
+    Err(last_err
+        .unwrap_or_else(|| Error::Internal("extraction parse retries exhausted".to_owned())))
 }
 
 fn parse_entries_response(response: &str) -> Result<Vec<MemoryEntry>> {

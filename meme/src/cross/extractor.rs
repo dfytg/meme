@@ -48,7 +48,8 @@ impl ObservationExtractor {
                         return None;
                     }
                     if text.len() > 500 {
-                        Some(format!("{}...", &text[..497]))
+                        let boundary = text.floor_char_boundary(497);
+                        Some(format!("{}...", &text[..boundary]))
                     } else {
                         Some(text.to_owned())
                     }
