@@ -308,11 +308,33 @@ impl VectorStore for LanceDbStore {
 
         let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
         let table = self.get_table().await?;
+        let was_empty = table
+            .count_rows(None)
+            .await
+            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
+            == 0;
+
         table
             .add(Box::new(reader))
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("add entries failed: {e}")))?;
+
+        // Create FTS index after first data insertion.
+        if was_empty {
+            if let Err(e) = table
+                .create_index(
+                    &["restatement"],
+                    lancedb::index::Index::FTS(Default::default()),
+                )
+                .execute()
+                .await
+            {
+                tracing::warn!(error = %e, "FTS index creation skipped");
+            } else {
+                tracing::info!("FTS index created on restatement column");
+            }
+        }
 
         tracing::info!(count = n, "added memory entries");
         Ok(())

@@ -167,11 +167,16 @@ impl HybridRetriever {
             })
             .filter(|v: &Vec<String>| !v.is_empty());
 
+        let timestamp_range = analysis["time_expression"]
+            .as_str()
+            .filter(|s| *s != "null" && !s.is_empty())
+            .and_then(|expr| parse_time_range(expr, chrono::Utc::now()));
+
         let filter = MetadataFilter {
             persons,
             location,
             entities,
-            timestamp_range: None,
+            timestamp_range,
         };
 
         if filter.is_empty() {
@@ -405,4 +410,77 @@ impl HybridRetriever {
 fn deduplicate(entries: Vec<MemoryEntry>) -> Vec<MemoryEntry> {
     let mut seen = HashSet::new();
     entries.into_iter().filter(|e| seen.insert(e.id)).collect()
+}
+
+/// Parse a time expression into a `(start, end)` datetime range.
+///
+/// Supports:
+/// - Relative: "last week", "yesterday", "last month", "last 3 days"
+/// - ISO 8601: "2025-11-15T14:00:00Z"
+/// - Date only: "2025-11-15", "November 15"
+fn parse_time_range(
+    expr: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
+    use chrono::{Duration, NaiveDate, TimeZone, Utc};
+
+    let lower = expr.trim().to_lowercase();
+
+    // Relative expressions.
+    if lower.contains("yesterday") {
+        let start = (now - Duration::days(1))
+            .date_naive()
+            .and_hms_opt(0, 0, 0)?;
+        let end = (now - Duration::days(1))
+            .date_naive()
+            .and_hms_opt(23, 59, 59)?;
+        return Some((Utc.from_utc_datetime(&start), Utc.from_utc_datetime(&end)));
+    }
+    if lower.contains("today") {
+        let start = now.date_naive().and_hms_opt(0, 0, 0)?;
+        let end = now.date_naive().and_hms_opt(23, 59, 59)?;
+        return Some((Utc.from_utc_datetime(&start), Utc.from_utc_datetime(&end)));
+    }
+    if lower.contains("last week") || lower.contains("past week") {
+        let start = now - Duration::days(7);
+        return Some((start, now));
+    }
+    if lower.contains("last month") || lower.contains("past month") {
+        let start = now - Duration::days(30);
+        return Some((start, now));
+    }
+
+    // "last N days" pattern.
+    static RE_LAST_N_DAYS: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"last\s+(\d+)\s+days?").expect("valid"));
+    if let Some(caps) = RE_LAST_N_DAYS.captures(&lower) {
+        if let Ok(n) = caps[1].parse::<i64>() {
+            let start = now - Duration::days(n);
+            return Some((start, now));
+        }
+    }
+
+    // Try ISO 8601 datetime parse.
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(expr.trim()) {
+        let dt = dt.with_timezone(&Utc);
+        let start = dt.date_naive().and_hms_opt(0, 0, 0)?;
+        let end = dt.date_naive().and_hms_opt(23, 59, 59)?;
+        return Some((Utc.from_utc_datetime(&start), Utc.from_utc_datetime(&end)));
+    }
+
+    // Try "YYYY-MM-DD" date parse.
+    if let Ok(date) = NaiveDate::parse_from_str(expr.trim(), "%Y-%m-%d") {
+        let start = date.and_hms_opt(0, 0, 0)?;
+        let end = date.and_hms_opt(23, 59, 59)?;
+        return Some((Utc.from_utc_datetime(&start), Utc.from_utc_datetime(&end)));
+    }
+
+    // Try NaiveDateTime without timezone.
+    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(expr.trim(), "%Y-%m-%dT%H:%M:%S") {
+        let start = ndt.date().and_hms_opt(0, 0, 0)?;
+        let end = ndt.date().and_hms_opt(23, 59, 59)?;
+        return Some((Utc.from_utc_datetime(&start), Utc.from_utc_datetime(&end)));
+    }
+
+    None
 }

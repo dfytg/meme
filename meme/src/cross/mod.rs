@@ -5,12 +5,16 @@
 
 mod collector;
 mod consolidation;
+mod extractor;
 mod injector;
 mod orchestrator;
 mod session;
 
-pub use collector::EventCollector;
-pub use consolidation::{ConsolidationPolicy, ConsolidationWorker};
-pub use injector::ContextInjector;
+pub use collector::{EventCollector, RedactionFilter};
+pub use consolidation::{
+    ConsolidationActions, ConsolidationPolicy, ConsolidationStats, ConsolidationWorker,
+};
+pub use extractor::ObservationExtractor;
+pub use injector::{ContextInjector, render_for_system_prompt};
 pub use orchestrator::CrossOrchestrator;
 pub use session::SessionManager;

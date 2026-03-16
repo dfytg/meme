@@ -131,8 +131,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    // ── Sessions ──
-
     /// Insert a new session record.
     ///
     /// # Errors
@@ -240,8 +238,6 @@ impl SqliteStore {
         Ok(sessions)
     }
 
-    // ── Events ──
-
     /// Insert a session event.
     ///
     /// # Errors
@@ -291,8 +287,6 @@ impl SqliteStore {
         }
         Ok(events)
     }
-
-    // ── Observations ──
 
     /// Insert an observation.
     ///
@@ -352,7 +346,45 @@ impl SqliteStore {
         Ok(observations)
     }
 
-    // ── Summaries ──
+    /// Get recent observations across all sessions for a project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_recent_observations(
+        &self,
+        project: &str,
+        limit: usize,
+    ) -> Result<Vec<CrossObservation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT o.obs_id, o.memory_session_id, o.timestamp, o.obs_type, o.title, o.subtitle, o.facts_json, o.narrative, o.concepts_json, o.files_json, o.vector_ref
+             FROM observations o
+             JOIN sessions s ON o.memory_session_id = s.memory_session_id
+             WHERE s.project = ?1
+             ORDER BY o.timestamp DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![project, limit as i64], |row| {
+            Ok(CrossObservation {
+                obs_id: Some(row.get(0)?),
+                memory_session_id: parse_uuid(&row.get::<_, String>(1)?),
+                timestamp: parse_datetime(&row.get::<_, String>(2)?),
+                obs_type: parse_observation_type(&row.get::<_, String>(3)?),
+                title: row.get(4)?,
+                subtitle: row.get(5)?,
+                facts_json: row.get(6)?,
+                narrative: row.get(7)?,
+                concepts_json: row.get(8)?,
+                files_json: row.get(9)?,
+                vector_ref: row.get(10)?,
+            })
+        })?;
+
+        let mut observations = Vec::new();
+        for row in rows {
+            observations.push(row?);
+        }
+        Ok(observations)
+    }
 
     /// Insert or replace a session summary.
     ///
@@ -410,8 +442,6 @@ impl SqliteStore {
         }
         Ok(summaries)
     }
-
-    // ── Consolidation ──
 
     /// Record a consolidation run.
     ///
