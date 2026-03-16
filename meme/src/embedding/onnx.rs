@@ -1,19 +1,20 @@
 //! Local ONNX Runtime embedding provider.
 //!
 //! Requires the `onnx` feature flag to be enabled.
+//! Built against `ort 2.0.0-rc.12` API.
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::provider::EmbeddingProvider;
 use crate::error::{Error, Result};
 
 /// Embedding provider that runs a local ONNX model via `ort`.
 ///
-/// Session and tokenizer are wrapped in `Arc` so CPU-bound inference
-/// can be offloaded to a blocking thread via `spawn_blocking`.
+/// Session is wrapped in `Arc<Mutex<_>>` because `Session::run` requires
+/// `&mut self`. Tokenizer is in `Arc` for cheap cloning into blocking tasks.
 pub struct OnnxEmbedding {
-    session: Arc<ort::session::Session>,
+    session: Arc<Mutex<ort::session::Session>>,
     tokenizer: Arc<tokenizers::Tokenizer>,
     dimension: usize,
 }
@@ -38,14 +39,14 @@ impl OnnxEmbedding {
         dimension: usize,
     ) -> Result<Self> {
         let session = ort::session::Session::builder()
-            .and_then(|b| b.with_model_from_file(model_path.as_ref()))
+            .and_then(|mut b| b.commit_from_file(model_path.as_ref()))
             .map_err(|e| Error::Embedding(format!("failed to load ONNX model: {e}")))?;
 
         let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path.as_ref())
             .map_err(|e| Error::Embedding(format!("failed to load tokenizer: {e}")))?;
 
         Ok(Self {
-            session: Arc::new(session),
+            session: Arc::new(Mutex::new(session)),
             tokenizer: Arc::new(tokenizer),
             dimension,
         })
@@ -53,7 +54,7 @@ impl OnnxEmbedding {
 }
 
 fn encode_batch_sync(
-    session: &ort::session::Session,
+    session: &Mutex<ort::session::Session>,
     tokenizer: &tokenizers::Tokenizer,
     texts: &[&str],
     dimension: usize,
@@ -87,20 +88,32 @@ fn encode_batch_sync(
         ndarray::Array2::from_shape_vec((batch_size, max_len), attention_mask)
             .map_err(|e| Error::Embedding(format!("shape error: {e}")))?;
 
-    let outputs = session
-        .run(
-            ort::inputs![input_ids_array, attention_mask_array]
-                .map_err(|e| Error::Embedding(format!("input creation failed: {e}")))?,
-        )
+    let ids_tensor = ort::value::TensorRef::from_array_view(&input_ids_array)
+        .map_err(|e| Error::Embedding(format!("tensor creation failed: {e}")))?;
+    let mask_tensor = ort::value::TensorRef::from_array_view(&attention_mask_array)
+        .map_err(|e| Error::Embedding(format!("tensor creation failed: {e}")))?;
+
+    let mut sess = session
+        .lock()
+        .map_err(|e| Error::Embedding(format!("session lock poisoned: {e}")))?;
+
+    let outputs = sess
+        .run(ort::inputs![ids_tensor, mask_tensor])
         .map_err(|e| Error::Embedding(format!("ONNX inference failed: {e}")))?;
 
-    let output_tensor = outputs[0]
+    let (_shape, flat_data) = outputs[0]
         .try_extract_tensor::<f32>()
         .map_err(|e| Error::Embedding(format!("output extraction failed: {e}")))?;
 
     let mut results = Vec::with_capacity(batch_size);
     for i in 0..batch_size {
-        let embedding: Vec<f32> = output_tensor.slice(ndarray::s![i, ..dimension]).to_vec();
+        let start = i * dimension;
+        let end = start + dimension;
+        let embedding = if end <= flat_data.len() {
+            flat_data[start..end].to_vec()
+        } else {
+            vec![0.0f32; dimension]
+        };
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         let normalized = if norm > 0.0 {
             embedding.iter().map(|x| x / norm).collect()
