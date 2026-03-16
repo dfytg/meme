@@ -126,14 +126,14 @@ impl HybridRetriever {
         query: &str,
         analysis: &serde_json::Value,
     ) -> Result<Vec<MemoryEntry>> {
-        let keywords: Vec<String> = analysis["keywords"]
-            .as_array()
-            .map(|a| {
+        let keywords: Vec<String> = analysis["keywords"].as_array().map_or_else(
+            || vec![query.to_owned()],
+            |a| {
                 a.iter()
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect()
-            })
-            .unwrap_or_else(|| vec![query.to_owned()]);
+            },
+        );
 
         if keywords.is_empty() {
             return Ok(Vec::new());
@@ -257,14 +257,14 @@ impl HybridRetriever {
         let response = self.llm.chat(&messages, &opts).await?;
         let result = extract_json_from_text(&response)?;
 
-        let mut queries: Vec<String> = result["queries"]
-            .as_array()
-            .map(|a| {
+        let mut queries: Vec<String> = result["queries"].as_array().map_or_else(
+            || vec![query.to_owned()],
+            |a| {
                 a.iter()
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect()
-            })
-            .unwrap_or_else(|| vec![query.to_owned()]);
+            },
+        );
 
         if !queries.iter().any(|q| q == query) {
             queries.insert(0, query.to_owned());
@@ -412,6 +412,9 @@ fn deduplicate(entries: Vec<MemoryEntry>) -> Vec<MemoryEntry> {
     entries.into_iter().filter(|e| seen.insert(e.id)).collect()
 }
 
+static RE_LAST_N_DAYS: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"last\s+(\d+)\s+days?").expect("valid regex"));
+
 /// Parse a time expression into a `(start, end)` datetime range.
 ///
 /// Supports:
@@ -450,14 +453,11 @@ fn parse_time_range(
         return Some((start, now));
     }
 
-    // "last N days" pattern.
-    static RE_LAST_N_DAYS: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"last\s+(\d+)\s+days?").expect("valid"));
-    if let Some(caps) = RE_LAST_N_DAYS.captures(&lower) {
-        if let Ok(n) = caps[1].parse::<i64>() {
-            let start = now - Duration::days(n);
-            return Some((start, now));
-        }
+    if let Some(caps) = RE_LAST_N_DAYS.captures(&lower)
+        && let Ok(n) = caps[1].parse::<i64>()
+    {
+        let start = now - Duration::days(n);
+        return Some((start, now));
     }
 
     // Try ISO 8601 datetime parse.

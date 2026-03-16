@@ -22,7 +22,7 @@ impl ConsolidateCmd {
     /// # Errors
     ///
     /// Returns an error if consolidation fails.
-    pub fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(&self) -> anyhow::Result<()> {
         if self.dry_run {
             println!("Dry run mode — no changes will be made.");
         }
@@ -31,7 +31,10 @@ impl ConsolidateCmd {
         let orch =
             CrossOrchestrator::new(&self.project, &config).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-        let stats = orch.consolidate().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let stats = orch
+            .consolidate()
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         println!("Consolidation complete:");
         println!("  Scanned:  {}", stats.scanned);

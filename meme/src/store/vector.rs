@@ -1,4 +1,4 @@
-//! Vector store — multi-view indexing with LanceDB.
+//! Vector store — multi-view indexing with `LanceDB`.
 
 use std::sync::Arc;
 
@@ -7,6 +7,7 @@ use arrow_array::{
     StringArray,
 };
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::embedding::EmbeddingProvider;
@@ -35,6 +36,12 @@ pub trait VectorStore: Send + Sync {
     /// Retrieve all entries.
     async fn get_all(&self) -> Result<Vec<MemoryEntry>>;
 
+    /// Retrieve all entries together with their embedding vectors.
+    async fn get_all_with_vectors(&self) -> Result<Vec<(MemoryEntry, Vec<f32>)>>;
+
+    /// Delete entries by their IDs.
+    async fn delete_entries(&self, entry_ids: &[String]) -> Result<usize>;
+
     /// Count the total number of entries.
     async fn count(&self) -> Result<usize>;
 
@@ -59,7 +66,7 @@ impl std::fmt::Debug for LanceDbStore {
 }
 
 impl LanceDbStore {
-    /// Open or create a LanceDB store.
+    /// Open or create a `LanceDB` store.
     ///
     /// # Errors
     ///
@@ -93,7 +100,9 @@ impl LanceDbStore {
             .await
             .map_err(|e| Error::VectorStore(format!("list tables failed: {e}")))?;
 
-        if !tables.contains(&self.table_name) {
+        if tables.contains(&self.table_name) {
+            tracing::info!(table = %self.table_name, "opened existing LanceDB table");
+        } else {
             let schema = self.build_schema();
             self.db
                 .create_empty_table(&self.table_name, schema)
@@ -101,8 +110,6 @@ impl LanceDbStore {
                 .await
                 .map_err(|e| Error::VectorStore(format!("create table failed: {e}")))?;
             tracing::info!(table = %self.table_name, "created new LanceDB table");
-        } else {
-            tracing::info!(table = %self.table_name, "opened existing LanceDB table");
         }
         Ok(())
     }
@@ -121,7 +128,10 @@ impl LanceDbStore {
                 "vector",
                 DataType::FixedSizeList(
                     Arc::new(Field::new("item", DataType::Float32, true)),
-                    self.dimension as i32,
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+                    {
+                        self.dimension as i32
+                    },
                 ),
                 false,
             ),
@@ -137,6 +147,7 @@ impl LanceDbStore {
     }
 
     fn batch_to_entries(&self, batch: &RecordBatch) -> Vec<MemoryEntry> {
+        let _ = &self;
         let n = batch.num_rows();
         let mut entries = Vec::with_capacity(n);
 
@@ -231,6 +242,32 @@ fn escape_like(s: &str) -> String {
         .replace('_', "\\_")
 }
 
+fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
+    let n = batch.num_rows();
+    let Some(col) = batch.column_by_name("vector") else {
+        return vec![Vec::new(); n];
+    };
+    let Some(fsl) = col.as_any().downcast_ref::<FixedSizeListArray>() else {
+        return vec![Vec::new(); n];
+    };
+    let values = fsl.values();
+    let Some(float_values) = values.as_any().downcast_ref::<Float32Array>() else {
+        return vec![Vec::new(); n];
+    };
+
+    let mut vectors = Vec::with_capacity(n);
+    for i in 0..n {
+        let start = i * dimension;
+        let end = start + dimension;
+        if end <= float_values.len() {
+            vectors.push(float_values.values()[start..end].to_vec());
+        } else {
+            vectors.push(Vec::new());
+        }
+    }
+    vectors
+}
+
 #[async_trait::async_trait]
 impl VectorStore for LanceDbStore {
     async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()> {
@@ -292,12 +329,13 @@ impl VectorStore for LanceDbStore {
         let values = Float32Array::from(flat);
         let fsl_field = Arc::new(Field::new("item", DataType::Float32, true));
         let vector_array: ArrayRef = Arc::new(
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             FixedSizeListArray::try_new(fsl_field, dim as i32, Arc::new(values), None)
                 .map_err(|e| Error::VectorStore(format!("vector array error: {e}")))?,
         );
 
         let batch = RecordBatch::try_new(
-            schema.clone(),
+            Arc::clone(&schema),
             vec![
                 entry_ids,
                 restatements,
@@ -331,7 +369,7 @@ impl VectorStore for LanceDbStore {
             if let Err(e) = table
                 .create_index(
                     &["restatement"],
-                    lancedb::index::Index::FTS(Default::default()),
+                    lancedb::index::Index::FTS(lancedb::index::scalar::FtsIndexBuilder::default()),
                 )
                 .execute()
                 .await
@@ -366,7 +404,6 @@ impl VectorStore for LanceDbStore {
             .await
             .map_err(|e| Error::VectorStore(format!("vector search failed: {e}")))?;
 
-        use futures::TryStreamExt;
         let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
@@ -410,7 +447,6 @@ impl VectorStore for LanceDbStore {
             .await
             .map_err(|e| Error::VectorStore(format!("keyword search failed: {e}")))?;
 
-        use futures::TryStreamExt;
         let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
@@ -489,7 +525,6 @@ impl VectorStore for LanceDbStore {
             .await
             .map_err(|e| Error::VectorStore(format!("structured search failed: {e}")))?;
 
-        use futures::TryStreamExt;
         let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
@@ -509,7 +544,6 @@ impl VectorStore for LanceDbStore {
             .await
             .map_err(|e| Error::VectorStore(format!("get all failed: {e}")))?;
 
-        use futures::TryStreamExt;
         let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
@@ -519,6 +553,50 @@ impl VectorStore for LanceDbStore {
             .iter()
             .flat_map(|b| self.batch_to_entries(b))
             .collect())
+    }
+
+    async fn get_all_with_vectors(&self) -> Result<Vec<(MemoryEntry, Vec<f32>)>> {
+        let table = self.get_table().await?;
+        let results = table
+            .query()
+            .execute()
+            .await
+            .map_err(|e| Error::VectorStore(format!("get all with vectors failed: {e}")))?;
+
+        let batches: Vec<RecordBatch> = results
+            .try_collect()
+            .await
+            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
+
+        let mut pairs = Vec::new();
+        for batch in &batches {
+            let entries = self.batch_to_entries(batch);
+            let vectors = batch_to_vectors(batch, self.dimension);
+            for (entry, vec) in entries.into_iter().zip(vectors) {
+                pairs.push((entry, vec));
+            }
+        }
+        Ok(pairs)
+    }
+
+    async fn delete_entries(&self, entry_ids: &[String]) -> Result<usize> {
+        if entry_ids.is_empty() {
+            return Ok(0);
+        }
+        let table = self.get_table().await?;
+        let ids_csv: String = entry_ids
+            .iter()
+            .map(|id| format!("'{}'", id.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let predicate = format!("entry_id IN ({ids_csv})");
+        let count = entry_ids.len();
+        table
+            .delete(&predicate)
+            .await
+            .map_err(|e| Error::VectorStore(format!("delete entries failed: {e}")))?;
+        tracing::info!(count, "deleted entries from vector store");
+        Ok(count)
     }
 
     async fn count(&self) -> Result<usize> {

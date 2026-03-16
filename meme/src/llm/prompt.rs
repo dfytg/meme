@@ -1,5 +1,7 @@
 //! Prompt templates for LLM interactions across the pipeline.
 
+use std::fmt::Write;
+
 use crate::model::MemoryEntry;
 
 /// Collection of prompt templates used throughout the pipeline.
@@ -62,7 +64,7 @@ Now process the above dialogues. Return ONLY the JSON array, no other explanatio
         let mut ctx =
             "\n[Previous Window Memory Entries (for reference to avoid duplication)]\n".to_owned();
         for entry in previous_entries.iter().take(3) {
-            ctx.push_str(&format!("- {}\n", entry.restatement));
+            let _ = writeln!(ctx, "- {}", entry.restatement);
         }
         ctx
     }
@@ -303,7 +305,7 @@ Now answer the question. Return ONLY the JSON, no other text."#
             .map(|(i, e)| {
                 let mut line = format!("[Info {}] {}", i + 1, e.restatement);
                 if let Some(ts) = e.timestamp {
-                    line.push_str(&format!(" | Time: {}", ts.format("%+")));
+                    let _ = write!(line, " | Time: {}", ts.format("%+"));
                 }
                 line
             })

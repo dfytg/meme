@@ -58,7 +58,7 @@ impl AnswerGenerator {
                 Ok(result) => {
                     return Ok(result["answer"]
                         .as_str()
-                        .unwrap_or(response.trim())
+                        .unwrap_or_else(|| response.trim())
                         .to_owned());
                 }
                 Err(e) => {

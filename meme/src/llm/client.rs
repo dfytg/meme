@@ -190,6 +190,10 @@ impl LlmClient for OpenAiClient {
 }
 
 /// Extract a JSON value from text that may contain markdown fences and other noise.
+///
+/// # Errors
+///
+/// Returns an error if no valid JSON can be found in the input.
 pub fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
     let text = text.trim();
     if text.is_empty() {
@@ -205,17 +209,17 @@ pub fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
     }
 
     // Try extracting from ```json ... ``` block.
-    if let Some(json_str) = extract_fenced_json(stripped) {
-        if let Ok(v) = parse_with_cleanup(&json_str) {
-            return Ok(v);
-        }
+    if let Some(json_str) = extract_fenced_json(stripped)
+        && let Ok(v) = parse_with_cleanup(&json_str)
+    {
+        return Ok(v);
     }
 
     // Try extracting from generic ``` ... ``` block.
-    if let Some(json_str) = extract_generic_fenced(stripped) {
-        if let Ok(v) = parse_with_cleanup(&json_str) {
-            return Ok(v);
-        }
+    if let Some(json_str) = extract_generic_fenced(stripped)
+        && let Ok(v) = parse_with_cleanup(&json_str)
+    {
+        return Ok(v);
     }
 
     // Try finding balanced JSON object/array.
@@ -321,7 +325,7 @@ fn extract_balanced_json(text: &str, start_char: char) -> Option<serde_json::Val
         } else if ch == end_char {
             depth -= 1;
             if depth == 0 {
-                let json_str = &text[start_idx..start_idx + i + 1];
+                let json_str = &text[start_idx..=(start_idx + i)];
                 if let Ok(v) = serde_json::from_str(json_str) {
                     return Some(v);
                 }

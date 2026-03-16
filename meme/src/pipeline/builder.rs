@@ -15,7 +15,7 @@ use crate::llm::prompt::Prompts;
 use crate::model::{Dialogue, MemoryEntry};
 
 /// Memory builder that implements Stage 1 (Semantic Structured Compression)
-/// and Stage 2 (Online Semantic Synthesis) of the SimpleMem pipeline.
+/// and Stage 2 (Online Semantic Synthesis) of the `SimpleMem` pipeline.
 pub struct MemoryBuilder {
     llm: Arc<dyn LlmClient>,
     window_size: usize,
@@ -113,19 +113,19 @@ impl MemoryBuilder {
         let dialogues = std::mem::take(&mut self.dialogue_buffer);
         let entries = self.generate_entries(&dialogues).await?;
         self.processed_count += dialogues.len();
-        self.previous_entries = entries.clone();
+        entries.clone_into(&mut self.previous_entries);
         Ok(entries)
     }
 
     /// Returns the number of dialogues processed so far.
     #[must_use]
-    pub fn processed_count(&self) -> usize {
+    pub const fn processed_count(&self) -> usize {
         self.processed_count
     }
 
     /// Returns the number of dialogues in the buffer.
     #[must_use]
-    pub fn buffer_len(&self) -> usize {
+    pub const fn buffer_len(&self) -> usize {
         self.dialogue_buffer.len()
     }
 
@@ -147,7 +147,7 @@ impl MemoryBuilder {
 
         let entries = self.generate_entries(&window).await?;
         self.processed_count += window.len();
-        self.previous_entries = entries.clone();
+        entries.clone_into(&mut self.previous_entries);
 
         tracing::info!(count = entries.len(), "generated memory entries");
         Ok(entries)
@@ -227,7 +227,7 @@ async fn generate_entries_standalone(
 ) -> Result<Vec<MemoryEntry>> {
     let dialogue_text: String = dialogues
         .iter()
-        .map(|d| d.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = Prompts::extraction(&dialogue_text, context);

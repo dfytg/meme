@@ -72,7 +72,7 @@ impl ObservationExtractor {
             .collect()
     }
 
-    /// Convert session events to `Dialogue` objects for the core MemoryBuilder pipeline.
+    /// Convert session events to `Dialogue` objects for the core `MemoryBuilder` pipeline.
     ///
     /// - Messages become `role: content` dialogues
     /// - Tool uses become `"Agent: Used tool X. Input: ... Output: ..."` dialogues
@@ -194,7 +194,7 @@ impl ObservationExtractor {
             .filter(|e| e.kind == EventKind::ToolUse)
             .filter_map(|e| e.payload_json.as_deref())
             .filter_map(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .filter_map(|v| v.get("files_modified")?.as_array().map(|a| a.len()))
+            .filter_map(|v| v.get("files_modified")?.as_array().map(Vec::len))
             .sum();
 
         let mut value = 0.1;

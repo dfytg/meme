@@ -64,7 +64,7 @@ pub struct MetadataFilter {
 impl MetadataFilter {
     /// Returns `true` if no filter criteria are set.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.persons.is_none()
             && self.location.is_none()
             && self.entities.is_none()

@@ -65,7 +65,7 @@ pub enum RedactionLevel {
     Full,
 }
 
-/// A conversation session record persisted in SQLite.
+/// A conversation session record persisted in `SQLite`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     /// Database row ID.

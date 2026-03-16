@@ -30,7 +30,7 @@ impl Dialogue {
 
     /// Set the timestamp.
     #[must_use]
-    pub fn with_timestamp(mut self, ts: DateTime<Utc>) -> Self {
+    pub const fn with_timestamp(mut self, ts: DateTime<Utc>) -> Self {
         self.timestamp = Some(ts);
         self
     }

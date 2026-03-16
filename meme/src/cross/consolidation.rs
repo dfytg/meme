@@ -45,7 +45,7 @@ impl Default for ConsolidationPolicy {
 impl ConsolidationPolicy {
     /// Create a policy from the cross-session configuration.
     #[must_use]
-    pub fn from_config(cfg: &CrossConfig) -> Self {
+    pub const fn from_config(cfg: &CrossConfig) -> Self {
         Self {
             max_age_days: cfg.consolidation_max_age_days,
             decay_factor: cfg.consolidation_decay_factor,
@@ -104,7 +104,8 @@ pub struct ConsolidationActions {
 
 impl ConsolidationWorker {
     /// Create a new consolidation worker.
-    pub fn new(policy: ConsolidationPolicy) -> Self {
+    #[must_use]
+    pub const fn new(policy: ConsolidationPolicy) -> Self {
         Self { policy }
     }
 
@@ -158,7 +159,7 @@ impl ConsolidationWorker {
         }
     }
 
-    /// Record a consolidation run in SQLite.
+    /// Record a consolidation run in `SQLite`.
     ///
     /// # Errors
     ///

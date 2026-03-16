@@ -22,7 +22,7 @@ pub enum Error {
     #[error("vector store error: {0}")]
     VectorStore(String),
 
-    /// SQLite operation failed.
+    /// `SQLite` operation failed.
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 

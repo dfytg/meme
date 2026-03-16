@@ -51,7 +51,7 @@ impl SessionCmd {
     /// # Errors
     ///
     /// Returns an error if the session operation fails.
-    pub fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(&self) -> anyhow::Result<()> {
         let config = Config::load_default().map_err(|e| anyhow::anyhow!("{e}"))?;
 
         match &self.action {
@@ -64,11 +64,14 @@ impl SessionCmd {
                     CrossOrchestrator::new(project, &config).map_err(|e| anyhow::anyhow!("{e}"))?;
                 let result = orch
                     .start_session(id, prompt.as_deref())
+                    .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
                 println!("Session started:");
                 println!("  Memory Session ID: {}", result.memory_session_id);
-                if !result.context_text.is_empty() {
+                if result.context_text.is_empty() {
+                    println!("  No previous context available.");
+                } else {
                     println!("  Injected context ({} chars):", result.context_text.len());
                     for line in result.context_text.lines().take(5) {
                         println!("    {line}");
@@ -76,8 +79,6 @@ impl SessionCmd {
                     if result.context_text.lines().count() > 5 {
                         println!("    ...");
                     }
-                } else {
-                    println!("  No previous context available.");
                 }
             }
             SessionAction::Stop { id, project } => {

@@ -5,9 +5,12 @@
 //! 2. **Observations** from recent sessions
 //! 3. **Semantic search results** against the user's prompt (when provided)
 
+use uuid::Uuid;
+
+use crate::embedding::EmbeddingProvider;
 use crate::error::Result;
 use crate::model::{ContextBundle, CrossEntry, CrossObservation, SessionSummary};
-use crate::store::SqliteStore;
+use crate::store::{SqliteStore, VectorStore};
 
 /// Builds a [`ContextBundle`] from past session data, constrained by a token budget.
 pub struct ContextInjector<'a> {
@@ -25,7 +28,7 @@ impl std::fmt::Debug for ContextInjector<'_> {
 
 impl<'a> ContextInjector<'a> {
     /// Create a new context injector.
-    pub fn new(db: &'a SqliteStore, max_tokens: usize) -> Self {
+    pub const fn new(db: &'a SqliteStore, max_tokens: usize) -> Self {
         Self { db, max_tokens }
     }
 
@@ -34,24 +37,26 @@ impl<'a> ContextInjector<'a> {
     /// Fills three tiers in priority order within the token budget:
     /// 1. Recent session summaries
     /// 2. Recent observations (decisions, discoveries, changes)
-    /// 3. Semantic search results (when `user_prompt` is provided)
+    /// 3. Semantic search results (when `user_prompt` is provided and stores available)
     ///
     /// # Errors
     ///
-    /// Returns an error if database queries fail.
-    pub fn build_context(
+    /// Returns an error if database queries or vector search fails.
+    pub async fn build_context(
         &self,
         project: &str,
-        _user_prompt: Option<&str>,
+        user_prompt: Option<&str>,
+        vector_store: Option<&dyn VectorStore>,
+        embedding: Option<&dyn EmbeddingProvider>,
     ) -> Result<ContextBundle> {
-        let mut _budget_remaining = self.max_tokens;
+        let mut budget_remaining = self.max_tokens;
         let mut total_tokens = 0usize;
 
         // Tier 1: Session summaries (highest priority).
         let raw_summaries = self.db.get_recent_summaries(project, 5)?;
         let (summaries, tokens_used) =
-            budget_items(&raw_summaries, text_for_summary, _budget_remaining);
-        _budget_remaining -= tokens_used;
+            budget_items(&raw_summaries, text_for_summary, budget_remaining);
+        budget_remaining -= tokens_used;
         total_tokens += tokens_used;
         tracing::debug!(
             packed = summaries.len(),
@@ -63,8 +68,8 @@ impl<'a> ContextInjector<'a> {
         // Tier 2: Observations.
         let raw_observations = self.db.get_recent_observations(project, 20)?;
         let (observations, tokens_used) =
-            budget_items(&raw_observations, text_for_observation, _budget_remaining);
-        _budget_remaining -= tokens_used;
+            budget_items(&raw_observations, text_for_observation, budget_remaining);
+        budget_remaining -= tokens_used;
         total_tokens += tokens_used;
         tracing::debug!(
             packed = observations.len(),
@@ -74,8 +79,31 @@ impl<'a> ContextInjector<'a> {
         );
 
         // Tier 3: Semantic search against user_prompt.
-        // TODO: integrate VectorStore for semantic search when prompt is provided.
-        let memory_entries: Vec<CrossEntry> = Vec::new();
+        let memory_entries = if let (Some(prompt), Some(store), Some(emb)) =
+            (user_prompt, vector_store, embedding)
+        {
+            if budget_remaining > 0 && !prompt.is_empty() {
+                self.semantic_search_entries(prompt, store, emb, budget_remaining)
+                    .await?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        if !memory_entries.is_empty() {
+            let entry_tokens: usize = memory_entries
+                .iter()
+                .map(|e| estimate_tokens(&e.entry.restatement))
+                .sum();
+            total_tokens += entry_tokens;
+            tracing::debug!(
+                packed = memory_entries.len(),
+                tokens = entry_tokens,
+                "context injection: semantic entries"
+            );
+        }
 
         let bundle = ContextBundle {
             session_summaries: summaries,
@@ -93,6 +121,40 @@ impl<'a> ContextInjector<'a> {
         );
 
         Ok(bundle)
+    }
+
+    async fn semantic_search_entries(
+        &self,
+        prompt: &str,
+        store: &dyn VectorStore,
+        embedding: &dyn EmbeddingProvider,
+        budget_remaining: usize,
+    ) -> Result<Vec<CrossEntry>> {
+        let query_vec = embedding.encode_query(prompt).await?;
+        let top_k = 10;
+        let entries = store.semantic_search(&query_vec, top_k).await?;
+
+        let mut results = Vec::new();
+        let mut tokens_used = 0usize;
+        for entry in entries {
+            let cost = estimate_tokens(&entry.restatement);
+            if tokens_used + cost > budget_remaining {
+                break;
+            }
+            tokens_used += cost;
+            results.push(CrossEntry {
+                entry,
+                tenant_id: "default".to_owned(),
+                memory_session_id: Uuid::nil(),
+                source_kind: "semantic_search".to_owned(),
+                source_id: None,
+                importance: 1.0,
+                valid_from: None,
+                valid_to: None,
+                superseded_by: None,
+            });
+        }
+        Ok(results)
     }
 }
 

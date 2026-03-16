@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 /// Top-level configuration for the meme system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Config {
     /// LLM provider configuration.
     pub llm: LlmConfig,
@@ -22,19 +23,6 @@ pub struct Config {
     pub parallel: ParallelConfig,
     /// Cross-session configuration.
     pub cross: CrossConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            llm: LlmConfig::default(),
-            embedding: EmbeddingConfig::default(),
-            store: StoreConfig::default(),
-            pipeline: PipelineConfig::default(),
-            parallel: ParallelConfig::default(),
-            cross: CrossConfig::default(),
-        }
-    }
 }
 
 impl Config {
@@ -184,7 +172,7 @@ impl Default for EmbeddingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StoreConfig {
-    /// Path to LanceDB storage directory.
+    /// Path to `LanceDB` storage directory.
     pub lancedb_path: String,
     /// Memory table name.
     pub table_name: String,
@@ -260,7 +248,7 @@ impl Default for ParallelConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CrossConfig {
-    /// Path to the SQLite database for cross-session data.
+    /// Path to the `SQLite` database for cross-session data.
     pub db_path: String,
     /// Maximum token budget for context injection.
     pub max_context_tokens: usize,
@@ -294,11 +282,11 @@ impl Default for CrossConfig {
 /// Returns the default data directory (`~/.meme/`).
 fn default_data_dir() -> PathBuf {
     directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".meme"))
-        .unwrap_or_else(|| PathBuf::from(".meme"))
+        .map_or_else(|| PathBuf::from(".meme"), |d| d.home_dir().join(".meme"))
 }
 
 /// Returns the default config file path (`~/.meme/config.toml`).
+#[must_use]
 pub fn default_config_path() -> PathBuf {
     default_data_dir().join("config.toml")
 }

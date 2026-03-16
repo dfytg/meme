@@ -104,7 +104,7 @@ impl std::fmt::Debug for EventCollector<'_> {
 
 impl<'a> EventCollector<'a> {
     /// Create a new event collector with redaction enabled.
-    pub fn new(db: &'a SqliteStore) -> Self {
+    pub const fn new(db: &'a SqliteStore) -> Self {
         Self {
             db,
             redaction_enabled: true,
@@ -113,7 +113,7 @@ impl<'a> EventCollector<'a> {
     }
 
     /// Create a collector with redaction disabled.
-    pub fn without_redaction(db: &'a SqliteStore) -> Self {
+    pub const fn without_redaction(db: &'a SqliteStore) -> Self {
         Self {
             db,
             redaction_enabled: false,
@@ -263,7 +263,7 @@ fn truncate(text: &str, max_len: usize) -> String {
     }
 }
 
-fn max_redaction_level(a: RedactionLevel, b: RedactionLevel) -> RedactionLevel {
+const fn max_redaction_level(a: RedactionLevel, b: RedactionLevel) -> RedactionLevel {
     match (a, b) {
         (RedactionLevel::Full, _) | (_, RedactionLevel::Full) => RedactionLevel::Full,
         (RedactionLevel::Partial, _) | (_, RedactionLevel::Partial) => RedactionLevel::Partial,

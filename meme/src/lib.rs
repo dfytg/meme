@@ -2,7 +2,7 @@
 //!
 //! Long-term memory for AI agents.
 //!
-//! A Rust implementation of the SimpleMem three-stage pipeline:
+//! A Rust implementation of the `SimpleMem` three-stage pipeline:
 //! 1. **Semantic Structured Compression** — dialogues → compact memory entries
 //! 2. **Online Semantic Synthesis** — deduplication during write
 //! 3. **Intent-Aware Retrieval Planning** — multi-view hybrid retrieval
@@ -28,6 +28,11 @@
 //! # Ok(())
 //! # }
 //! ```
+
+#![allow(clippy::future_not_send)]
+#![allow(clippy::missing_fields_in_debug)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_possible_truncation)]
 
 pub mod config;
 pub mod cross;
@@ -185,7 +190,7 @@ impl Meme {
 
     /// Get a reference to the configuration.
     #[must_use]
-    pub fn config(&self) -> &Config {
+    pub const fn config(&self) -> &Config {
         &self.config
     }
 
@@ -243,7 +248,7 @@ impl MemeBuilder {
 
     /// Clear the database on initialization.
     #[must_use]
-    pub fn clear_db(mut self, clear: bool) -> Self {
+    pub const fn clear_db(mut self, clear: bool) -> Self {
         self.clear_db = clear;
         self
     }
@@ -279,7 +284,7 @@ impl MemeBuilder {
             LanceDbStore::open(
                 &config.store.lancedb_path,
                 &config.store.table_name,
-                embedding.clone(),
+                Arc::clone(&embedding),
             )
             .await?,
         );

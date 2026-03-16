@@ -19,8 +19,8 @@ impl std::fmt::Debug for SessionManager<'_> {
 }
 
 impl<'a> SessionManager<'a> {
-    /// Create a new session manager backed by the given SQLite store.
-    pub fn new(db: &'a SqliteStore) -> Self {
+    /// Create a new session manager backed by the given `SQLite` store.
+    pub const fn new(db: &'a SqliteStore) -> Self {
         Self { db }
     }
 

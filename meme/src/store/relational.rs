@@ -10,7 +10,7 @@ use crate::model::{
     SessionEvent, SessionStatus, SessionSummary,
 };
 
-/// SQLite store for cross-session metadata (sessions, events, observations, summaries).
+/// `SQLite` store for cross-session metadata (sessions, events, observations, summaries).
 pub struct SqliteStore {
     conn: Connection,
 }
@@ -22,7 +22,7 @@ impl std::fmt::Debug for SqliteStore {
 }
 
 impl SqliteStore {
-    /// Open or create a SQLite database at the given path.
+    /// Open or create a `SQLite` database at the given path.
     ///
     /// # Errors
     ///
@@ -468,14 +468,11 @@ fn parse_uuid(s: &str) -> Uuid {
 }
 
 fn parse_datetime(s: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(s)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now())
+    DateTime::parse_from_rfc3339(s).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc))
 }
 
 fn parse_session_status(s: &str) -> SessionStatus {
     match s {
-        "active" => SessionStatus::Active,
         "completed" => SessionStatus::Completed,
         "failed" => SessionStatus::Failed,
         _ => SessionStatus::Active,
@@ -488,14 +485,12 @@ fn parse_event_kind(s: &str) -> EventKind {
         "tool_use" => EventKind::ToolUse,
         "file_change" => EventKind::FileChange,
         "note" => EventKind::Note,
-        "system" => EventKind::System,
         _ => EventKind::System,
     }
 }
 
 fn parse_redaction_level(s: &str) -> RedactionLevel {
     match s {
-        "none" => RedactionLevel::None,
         "partial" => RedactionLevel::Partial,
         "full" => RedactionLevel::Full,
         _ => RedactionLevel::None,
@@ -509,7 +504,6 @@ fn parse_observation_type(s: &str) -> ObservationType {
         "feature" => ObservationType::Feature,
         "refactor" => ObservationType::Refactor,
         "discovery" => ObservationType::Discovery,
-        "change" => ObservationType::Change,
         _ => ObservationType::Change,
     }
 }

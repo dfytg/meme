@@ -53,6 +53,7 @@ impl ImportCmd {
     /// # Errors
     ///
     /// Returns an error if the import fails.
+    #[allow(clippy::unused_async)]
     pub async fn run(&self) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(&self.file)?;
         let entries: Vec<meme::model::MemoryEntry> = serde_json::from_str(&content)?;

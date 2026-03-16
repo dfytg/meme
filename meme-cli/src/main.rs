@@ -1,5 +1,7 @@
 //! meme-cli — interactive management tool for the meme memory system.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::future_not_send)]
+
 mod commands;
 
 use clap::{Parser, Subcommand};
@@ -49,8 +51,8 @@ fn main() {
         Command::Add(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Ask(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::List(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Session(cmd) => cmd.run().map_err(|e| e.to_string()),
-        Command::Consolidate(cmd) => cmd.run().map_err(|e| e.to_string()),
+        Command::Session(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
+        Command::Consolidate(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Export(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Import(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
     };
