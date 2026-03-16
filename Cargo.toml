@@ -28,9 +28,9 @@ reqwest-eventsource = "0.6.0"
 
 # Vector database
 lancedb = "0.26.2"
-arrow = { version = "58.0.0", default-features = false }
-arrow-array = "58.0.0"
-arrow-schema = "58.0.0"
+arrow = { version = "57", default-features = false }
+arrow-array = "57"
+arrow-schema = "57"
 
 # Full-text search
 tantivy = "0.25.0"

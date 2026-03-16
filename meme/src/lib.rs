@@ -43,7 +43,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use config::Config;
 use embedding::{ApiEmbedding, EmbeddingProvider};
-use error::{Error, Result};
+use error::Result;
 use llm::client::{LlmClient, OpenAiClient};
 use model::{Dialogue, MemoryEntry};
 use pipeline::{AnswerGenerator, HybridRetriever, MemoryBuilder};

@@ -1,7 +1,7 @@
 //! Context injector — builds a token-budgeted context bundle at session start.
 
 use crate::error::Result;
-use crate::model::{ContextBundle, CrossEntry, CrossObservation, SessionSummary};
+use crate::model::ContextBundle;
 use crate::store::SqliteStore;
 
 /// Builds a [`ContextBundle`] from past session data, constrained by a token budget.
@@ -10,7 +10,7 @@ pub struct ContextInjector<'a> {
     max_tokens: usize,
 }
 
-impl<'a> std::fmt::Debug for ContextInjector<'a> {
+impl std::fmt::Debug for ContextInjector<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ContextInjector")
             .field("max_tokens", &self.max_tokens)

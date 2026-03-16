@@ -1,6 +1,14 @@
-//! Vector store — multi-view indexing with LanceDB + Tantivy FTS.
+//! Vector store — multi-view indexing with LanceDB.
 
 use std::sync::Arc;
+
+use arrow_array::types::Float32Type;
+use arrow_array::{
+    Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
+    StringArray,
+};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use lancedb::query::ExecutableQuery;
 
 use crate::embedding::EmbeddingProvider;
 use crate::error::{Error, Result};
@@ -10,31 +18,15 @@ use crate::model::{MemoryEntry, MetadataFilter};
 #[async_trait::async_trait]
 pub trait VectorStore: Send + Sync {
     /// Add entries with their pre-computed embedding vectors.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the database operation fails.
     async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()>;
 
     /// Semantic search by vector similarity.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the search operation fails.
     async fn semantic_search(&self, query_vec: &[f32], top_k: usize) -> Result<Vec<MemoryEntry>>;
 
-    /// Keyword search using full-text search (BM25).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the search operation fails.
+    /// Keyword search (scans restatement text for keyword matches).
     async fn keyword_search(&self, keywords: &[String], top_k: usize) -> Result<Vec<MemoryEntry>>;
 
     /// Structured search by metadata filtering.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the search operation fails.
     async fn structured_search(
         &self,
         filter: &MetadataFilter,
@@ -42,32 +34,19 @@ pub trait VectorStore: Send + Sync {
     ) -> Result<Vec<MemoryEntry>>;
 
     /// Retrieve all entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the read operation fails.
     async fn get_all(&self) -> Result<Vec<MemoryEntry>>;
 
     /// Count the total number of entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the count operation fails.
     async fn count(&self) -> Result<usize>;
 
     /// Clear all data and reinitialize.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the clear operation fails.
     async fn clear(&self) -> Result<()>;
 }
 
-/// LanceDB-backed vector store with Tantivy FTS support.
+/// LanceDB-backed vector store.
 pub struct LanceDbStore {
     db: lancedb::Connection,
     table_name: String,
-    embedding: Arc<dyn EmbeddingProvider>,
     dimension: usize,
 }
 
@@ -95,13 +74,12 @@ impl LanceDbStore {
         let db = lancedb::connect(db_path)
             .execute()
             .await
-            .map_err(|e| Error::VectorStore(format!("failed to connect to LanceDB: {e}")))?;
+            .map_err(|e| Error::VectorStore(format!("failed to connect: {e}")))?;
 
         let dimension = embedding.dimension();
         let store = Self {
             db,
             table_name: table_name.to_owned(),
-            embedding,
             dimension,
         };
         store.ensure_table().await?;
@@ -114,7 +92,7 @@ impl LanceDbStore {
             .table_names()
             .execute()
             .await
-            .map_err(|e| Error::VectorStore(format!("failed to list tables: {e}")))?;
+            .map_err(|e| Error::VectorStore(format!("list tables failed: {e}")))?;
 
         if !tables.contains(&self.table_name) {
             let schema = self.build_schema();
@@ -122,7 +100,7 @@ impl LanceDbStore {
                 .create_empty_table(&self.table_name, schema)
                 .execute()
                 .await
-                .map_err(|e| Error::VectorStore(format!("failed to create table: {e}")))?;
+                .map_err(|e| Error::VectorStore(format!("create table failed: {e}")))?;
             tracing::info!(table = %self.table_name, "created new LanceDB table");
         } else {
             tracing::info!(table = %self.table_name, "opened existing LanceDB table");
@@ -130,29 +108,15 @@ impl LanceDbStore {
         Ok(())
     }
 
-    fn build_schema(&self) -> arrow_schema::SchemaRef {
-        use arrow_schema::{DataType, Field, Schema};
-
+    fn build_schema(&self) -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("entry_id", DataType::Utf8, false),
             Field::new("restatement", DataType::Utf8, false),
-            Field::new(
-                "keywords",
-                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-                false,
-            ),
+            Field::new("keywords_text", DataType::Utf8, false),
             Field::new("timestamp", DataType::Utf8, true),
             Field::new("location", DataType::Utf8, true),
-            Field::new(
-                "persons",
-                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-                false,
-            ),
-            Field::new(
-                "entities",
-                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-                false,
-            ),
+            Field::new("persons_text", DataType::Utf8, false),
+            Field::new("entities_text", DataType::Utf8, false),
             Field::new("topic", DataType::Utf8, true),
             Field::new(
                 "vector",
@@ -170,62 +134,67 @@ impl LanceDbStore {
             .open_table(&self.table_name)
             .execute()
             .await
-            .map_err(|e| Error::VectorStore(format!("failed to open table: {e}")))
+            .map_err(|e| Error::VectorStore(format!("open table failed: {e}")))
     }
 
-    fn rows_to_entries(&self, batch: &arrow_array::RecordBatch) -> Vec<MemoryEntry> {
-        use arrow_array::cast::AsArray;
-
+    fn batch_to_entries(&self, batch: &RecordBatch) -> Vec<MemoryEntry> {
         let n = batch.num_rows();
         let mut entries = Vec::with_capacity(n);
 
-        let id_col = batch.column_by_name("entry_id");
-        let restatement_col = batch.column_by_name("restatement");
-        let keywords_col = batch.column_by_name("keywords");
-        let timestamp_col = batch.column_by_name("timestamp");
-        let location_col = batch.column_by_name("location");
-        let persons_col = batch.column_by_name("persons");
-        let entities_col = batch.column_by_name("entities");
-        let topic_col = batch.column_by_name("topic");
+        let get_str = |name: &str| -> Option<&StringArray> {
+            batch
+                .column_by_name(name)
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+        };
+
+        let id_col = get_str("entry_id");
+        let restatement_col = get_str("restatement");
+        let keywords_col = get_str("keywords_text");
+        let ts_col = get_str("timestamp");
+        let loc_col = get_str("location");
+        let persons_col = get_str("persons_text");
+        let entities_col = get_str("entities_text");
+        let topic_col = get_str("topic");
 
         for i in 0..n {
-            let id_str = id_col
-                .and_then(|c| c.as_string_opt::<i32>())
-                .and_then(|a| {
-                    if a.is_null(i) {
-                        None
-                    } else {
-                        Some(a.value(i).to_owned())
-                    }
-                })
-                .unwrap_or_default();
-
+            let id_str = id_col.map(|c| c.value(i)).unwrap_or_default();
             let restatement = restatement_col
-                .and_then(|c| c.as_string_opt::<i32>())
-                .and_then(|a| {
-                    if a.is_null(i) {
-                        None
-                    } else {
-                        Some(a.value(i).to_owned())
-                    }
-                })
+                .map(|c| c.value(i).to_owned())
                 .unwrap_or_default();
 
-            let keywords = extract_string_list(keywords_col, i);
-            let persons = extract_string_list(persons_col, i);
-            let entities = extract_string_list(entities_col, i);
+            let keywords = keywords_col
+                .map(|c| split_delimited(c.value(i)))
+                .unwrap_or_default();
+            let persons = persons_col
+                .map(|c| split_delimited(c.value(i)))
+                .unwrap_or_default();
+            let entity_list = entities_col
+                .map(|c| split_delimited(c.value(i)))
+                .unwrap_or_default();
 
-            let timestamp_str = extract_optional_string(timestamp_col, i);
-            let timestamp = timestamp_str.and_then(|s| {
-                chrono::DateTime::parse_from_rfc3339(&s)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
-            });
+            let timestamp = ts_col
+                .filter(|c| !c.is_null(i))
+                .map(|c| c.value(i))
+                .filter(|s| !s.is_empty())
+                .and_then(|s| {
+                    chrono::DateTime::parse_from_rfc3339(s)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                });
 
-            let location = extract_optional_string(location_col, i);
-            let topic = extract_optional_string(topic_col, i);
+            let location = loc_col
+                .filter(|c| !c.is_null(i))
+                .map(|c| c.value(i))
+                .filter(|s| !s.is_empty())
+                .map(String::from);
 
-            let id = uuid::Uuid::parse_str(&id_str).unwrap_or_else(|_| uuid::Uuid::new_v4());
+            let topic = topic_col
+                .filter(|c| !c.is_null(i))
+                .map(|c| c.value(i))
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
+            let id = uuid::Uuid::parse_str(id_str).unwrap_or_else(|_| uuid::Uuid::new_v4());
 
             entries.push(MemoryEntry {
                 id,
@@ -234,49 +203,27 @@ impl LanceDbStore {
                 timestamp,
                 location,
                 persons,
-                entities,
+                entities: entity_list,
                 topic,
             });
         }
-
         entries
     }
 }
 
-fn extract_optional_string(col: Option<&arrow_array::ArrayRef>, idx: usize) -> Option<String> {
-    use arrow_array::cast::AsArray;
-    col.and_then(|c| c.as_string_opt::<i32>()).and_then(|a| {
-        if a.is_null(idx) {
-            None
-        } else {
-            let s = a.value(idx);
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_owned())
-            }
-        }
-    })
+fn split_delimited(s: &str) -> Vec<String> {
+    if s.is_empty() {
+        Vec::new()
+    } else {
+        s.split("||")
+            .map(|p| p.trim().to_owned())
+            .filter(|p| !p.is_empty())
+            .collect()
+    }
 }
 
-fn extract_string_list(col: Option<&arrow_array::ArrayRef>, idx: usize) -> Vec<String> {
-    use arrow_array::cast::AsArray;
-    col.and_then(|c| c.as_list_opt::<i32>())
-        .map(|list_arr| {
-            if list_arr.is_null(idx) {
-                return Vec::new();
-            }
-            let values = list_arr.value(idx);
-            let str_arr = values.as_string_opt::<i32>();
-            match str_arr {
-                Some(sa) => (0..sa.len())
-                    .filter(|&j| !sa.is_null(j))
-                    .map(|j| sa.value(j).to_owned())
-                    .collect(),
-                None => Vec::new(),
-            }
-        })
-        .unwrap_or_default()
+fn join_delimited(items: &[String]) -> String {
+    items.join("||")
 }
 
 #[async_trait::async_trait]
@@ -285,13 +232,6 @@ impl VectorStore for LanceDbStore {
         if entries.is_empty() {
             return Ok(());
         }
-
-        use std::sync::Arc;
-
-        use arrow_array::{
-            Array, ArrayRef, FixedSizeListArray, Float32Array, ListArray, RecordBatch, StringArray,
-        };
-        use arrow_schema::{DataType, Field};
 
         let n = entries.len();
         let schema = self.build_schema();
@@ -305,11 +245,12 @@ impl VectorStore for LanceDbStore {
                 .map(|e| e.restatement.clone())
                 .collect::<Vec<_>>(),
         ));
-
-        let keywords = build_list_array(entries.iter().map(|e| &e.keywords));
-        let persons = build_list_array(entries.iter().map(|e| &e.persons));
-        let entities_arr = build_list_array(entries.iter().map(|e| &e.entities));
-
+        let keywords_text: ArrayRef = Arc::new(StringArray::from(
+            entries
+                .iter()
+                .map(|e| join_delimited(&e.keywords))
+                .collect::<Vec<_>>(),
+        ));
         let timestamps: ArrayRef = Arc::new(StringArray::from(
             entries
                 .iter()
@@ -322,6 +263,18 @@ impl VectorStore for LanceDbStore {
                 .map(|e| e.location.clone().unwrap_or_default())
                 .collect::<Vec<_>>(),
         ));
+        let persons_text: ArrayRef = Arc::new(StringArray::from(
+            entries
+                .iter()
+                .map(|e| join_delimited(&e.persons))
+                .collect::<Vec<_>>(),
+        ));
+        let entities_text: ArrayRef = Arc::new(StringArray::from(
+            entries
+                .iter()
+                .map(|e| join_delimited(&e.entities))
+                .collect::<Vec<_>>(),
+        ));
         let topics: ArrayRef = Arc::new(StringArray::from(
             entries
                 .iter()
@@ -329,73 +282,72 @@ impl VectorStore for LanceDbStore {
                 .collect::<Vec<_>>(),
         ));
 
-        // Build fixed-size list for vectors.
         let dim = self.dimension;
-        let flat_values: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
-        let values_array = Float32Array::from(flat_values);
+        let flat: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
+        let values = Float32Array::from(flat);
         let fsl_field = Arc::new(Field::new("item", DataType::Float32, true));
         let vector_array: ArrayRef = Arc::new(
-            FixedSizeListArray::try_new(fsl_field, dim as i32, Arc::new(values_array), None)
+            FixedSizeListArray::try_new(fsl_field, dim as i32, Arc::new(values), None)
                 .map_err(|e| Error::VectorStore(format!("vector array error: {e}")))?,
         );
 
         let batch = RecordBatch::try_new(
-            schema,
+            schema.clone(),
             vec![
                 entry_ids,
                 restatements,
-                keywords,
+                keywords_text,
                 timestamps,
                 locations,
-                persons,
-                entities_arr,
+                persons_text,
+                entities_text,
                 topics,
                 vector_array,
             ],
         )
         .map_err(|e| Error::VectorStore(format!("record batch error: {e}")))?;
 
+        let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
         let table = self.get_table().await?;
         table
-            .add(Box::new(arrow_array::RecordBatchIterator::new(
-                vec![Ok(batch)],
-                self.build_schema(),
-            )))
+            .add(Box::new(reader))
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("add entries failed: {e}")))?;
 
-        tracing::info!(count = n, "added memory entries to vector store");
+        tracing::info!(count = n, "added memory entries");
         Ok(())
     }
 
     async fn semantic_search(&self, query_vec: &[f32], top_k: usize) -> Result<Vec<MemoryEntry>> {
         let table = self.get_table().await?;
-        let count = table
+        if table
             .count_rows(None)
             .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?;
-        if count == 0 {
+            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
+            == 0
+        {
             return Ok(Vec::new());
         }
 
         let results = table
-            .vector_search(query_vec)
-            .map_err(|e| Error::VectorStore(format!("vector search init failed: {e}")))?
+            .query()
+            .nearest_to(query_vec)
+            .map_err(|e| Error::VectorStore(format!("nearest_to failed: {e}")))?
             .limit(top_k)
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("vector search failed: {e}")))?;
 
         use futures::TryStreamExt;
-        let batches: Vec<arrow_array::RecordBatch> = results
+        let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
-            .map_err(|e| Error::VectorStore(format!("collect results failed: {e}")))?;
+            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.rows_to_entries(b))
+            .flat_map(|b| self.batch_to_entries(b))
             .collect())
     }
 
@@ -405,33 +357,41 @@ impl VectorStore for LanceDbStore {
         }
 
         let table = self.get_table().await?;
-        let count = table
+        if table
             .count_rows(None)
             .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?;
-        if count == 0 {
+            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
+            == 0
+        {
             return Ok(Vec::new());
         }
 
-        let query = keywords.join(" ");
+        let conditions: Vec<String> = keywords
+            .iter()
+            .map(|kw| {
+                let safe = kw.replace('\'', "''");
+                format!("(restatement LIKE '%{safe}%' OR keywords_text LIKE '%{safe}%')")
+            })
+            .collect();
+        let where_clause = conditions.join(" OR ");
+
         let results = table
-            .search(lancedb::query::QueryBase::FullTextSearch(
-                lancedb::query::FullTextSearchQuery::new(query),
-            ))
+            .query()
+            .only_if(where_clause)
             .limit(top_k)
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("keyword search failed: {e}")))?;
 
         use futures::TryStreamExt;
-        let batches: Vec<arrow_array::RecordBatch> = results
+        let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
-            .map_err(|e| Error::VectorStore(format!("collect results failed: {e}")))?;
+            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.rows_to_entries(b))
+            .flat_map(|b| self.batch_to_entries(b))
             .collect())
     }
 
@@ -445,37 +405,42 @@ impl VectorStore for LanceDbStore {
         }
 
         let table = self.get_table().await?;
-        let count = table
+        if table
             .count_rows(None)
             .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?;
-        if count == 0 {
+            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
+            == 0
+        {
             return Ok(Vec::new());
         }
 
         let mut conditions = Vec::new();
 
         if let Some(persons) = &filter.persons {
-            let values = persons
+            let conds: Vec<String> = persons
                 .iter()
-                .map(|p| format!("'{}'", p.replace('\'', "''")))
-                .collect::<Vec<_>>()
-                .join(", ");
-            conditions.push(format!("array_has_any(persons, make_array({values}))"));
+                .map(|p| format!("persons_text LIKE '%{}%'", p.replace('\'', "''")))
+                .collect();
+            if !conds.is_empty() {
+                conditions.push(format!("({})", conds.join(" OR ")));
+            }
         }
 
         if let Some(location) = &filter.location {
-            let safe = location.replace('\'', "''");
-            conditions.push(format!("location LIKE '%{safe}%'"));
+            conditions.push(format!(
+                "location LIKE '%{}%'",
+                location.replace('\'', "''")
+            ));
         }
 
         if let Some(entities) = &filter.entities {
-            let values = entities
+            let conds: Vec<String> = entities
                 .iter()
-                .map(|e| format!("'{}'", e.replace('\'', "''")))
-                .collect::<Vec<_>>()
-                .join(", ");
-            conditions.push(format!("array_has_any(entities, make_array({values}))"));
+                .map(|e| format!("entities_text LIKE '%{}%'", e.replace('\'', "''")))
+                .collect();
+            if !conds.is_empty() {
+                conditions.push(format!("({})", conds.join(" OR ")));
+            }
         }
 
         if let Some((start, end)) = &filter.timestamp_range {
@@ -501,14 +466,14 @@ impl VectorStore for LanceDbStore {
             .map_err(|e| Error::VectorStore(format!("structured search failed: {e}")))?;
 
         use futures::TryStreamExt;
-        let batches: Vec<arrow_array::RecordBatch> = results
+        let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
-            .map_err(|e| Error::VectorStore(format!("collect results failed: {e}")))?;
+            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.rows_to_entries(b))
+            .flat_map(|b| self.batch_to_entries(b))
             .collect())
     }
 
@@ -521,14 +486,14 @@ impl VectorStore for LanceDbStore {
             .map_err(|e| Error::VectorStore(format!("get all failed: {e}")))?;
 
         use futures::TryStreamExt;
-        let batches: Vec<arrow_array::RecordBatch> = results
+        let batches: Vec<RecordBatch> = results
             .try_collect()
             .await
-            .map_err(|e| Error::VectorStore(format!("collect results failed: {e}")))?;
+            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.rows_to_entries(b))
+            .flat_map(|b| self.batch_to_entries(b))
             .collect())
     }
 
@@ -541,44 +506,12 @@ impl VectorStore for LanceDbStore {
     }
 
     async fn clear(&self) -> Result<()> {
-        let _ = self
-            .db
-            .drop_table(&self.table_name)
+        self.db
+            .drop_table(&self.table_name, &[])
             .await
             .map_err(|e| Error::VectorStore(format!("drop table failed: {e}")))?;
         self.ensure_table().await?;
         tracing::info!(table = %self.table_name, "cleared vector store");
         Ok(())
     }
-}
-
-fn build_list_array<'a>(items: impl Iterator<Item = &'a Vec<String>>) -> arrow_array::ArrayRef {
-    use arrow_array::{Array, ListArray, StringArray};
-    use arrow_schema::{DataType, Field};
-
-    let items: Vec<&Vec<String>> = items.collect();
-    let mut offsets = vec![0i32];
-    let mut all_values = Vec::new();
-    for list in &items {
-        for s in *list {
-            all_values.push(s.as_str());
-        }
-        offsets.push(all_values.len() as i32);
-    }
-
-    let values = Arc::new(StringArray::from(all_values));
-    let offsets_buf = arrow_array::OffsetSizeTrait::from_usize;
-    let offset_buffer = arrow_array::builder::BufferBuilder::<i32>::new(offsets.len());
-
-    // Use ListArray::from_iter_primitive alternative: manual construction
-    let field = Arc::new(Field::new("item", DataType::Utf8, true));
-    Arc::new(
-        ListArray::try_new(
-            field,
-            arrow_array::OffsetBuffer::new(offsets.into()),
-            values,
-            None,
-        )
-        .expect("valid list array"),
-    )
 }

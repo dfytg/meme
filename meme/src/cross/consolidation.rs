@@ -5,7 +5,7 @@
 //! 2. **Merge** — combine near-duplicate entries with high semantic similarity
 //! 3. **Prune** — soft-delete entries whose importance has fallen below a threshold
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::config::CrossConfig;
@@ -74,7 +74,7 @@ pub struct ConsolidationWorker<'a> {
     tenant_id: String,
 }
 
-impl<'a> std::fmt::Debug for ConsolidationWorker<'a> {
+impl std::fmt::Debug for ConsolidationWorker<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConsolidationWorker")
             .field("policy", &self.policy)

@@ -13,7 +13,7 @@ pub struct EventCollector<'a> {
     default_redaction: RedactionLevel,
 }
 
-impl<'a> std::fmt::Debug for EventCollector<'a> {
+impl std::fmt::Debug for EventCollector<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventCollector")
             .field("default_redaction", &self.default_redaction)

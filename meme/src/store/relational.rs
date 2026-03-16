@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::model::{
     ConsolidationRun, CrossObservation, EventKind, ObservationType, RedactionLevel, Session,
     SessionEvent, SessionStatus, SessionSummary,

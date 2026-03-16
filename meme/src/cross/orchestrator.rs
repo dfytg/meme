@@ -1,7 +1,5 @@
 //! Cross-session orchestrator — top-level facade for the cross-session memory system.
 
-use std::sync::Arc;
-
 use uuid::Uuid;
 
 use super::collector::EventCollector;
