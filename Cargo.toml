@@ -1,5 +1,5 @@
 [workspace]
-members = ["meme"]
+members = ["meme", "meme-cli"]
 default-members = ["meme"]
 resolver = "3"
 

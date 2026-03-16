@@ -5,3 +5,7 @@ version = 4
 [[package]]
 name = "meme"
 version = "0.1.0"
+
+[[package]]
+name = "meme-cli"
+version = "0.1.0"
