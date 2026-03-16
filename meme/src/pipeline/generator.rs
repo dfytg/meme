@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::llm::client::{ChatOptions, LlmClient, Message};
+use crate::llm::client::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::llm::prompt::Prompts;
 use crate::model::MemoryEntry;
 
@@ -51,7 +51,7 @@ impl AnswerGenerator {
         let max_retries = 3;
         for attempt in 0..max_retries {
             match self.llm.chat(&messages, &opts).await {
-                Ok(response) => match self.llm.extract_json(&response) {
+                Ok(response) => match extract_json_from_text(&response) {
                     Ok(result) => {
                         return Ok(result["answer"]
                             .as_str()

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::config::PipelineConfig;
 use crate::error::{Error, Result};
-use crate::llm::client::{ChatOptions, LlmClient, Message};
+use crate::llm::client::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::llm::prompt::Prompts;
 use crate::model::{Dialogue, MemoryEntry};
 
@@ -158,6 +158,7 @@ impl MemoryBuilder {
         dialogues: Vec<Dialogue>,
     ) -> Result<Vec<MemoryEntry>> {
         self.dialogue_buffer.extend(dialogues);
+        let total_dialogues = self.dialogue_buffer.len();
 
         let mut windows = Vec::new();
         let mut pos = 0;
@@ -205,7 +206,7 @@ impl MemoryBuilder {
             }
         }
 
-        self.processed_count += all_entries.len();
+        self.processed_count += total_dialogues;
         if !all_entries.is_empty() {
             self.previous_entries = all_entries[all_entries.len().saturating_sub(10)..].to_vec();
         }
@@ -244,33 +245,28 @@ async fn generate_entries_standalone(
     };
 
     let max_retries = 3;
+    let mut last_err = None;
     for attempt in 0..max_retries {
         match llm.chat(&messages, &opts).await {
-            Ok(response) => match parse_entries_response(llm, &response) {
+            Ok(response) => match parse_entries_response(&response) {
                 Ok(entries) => return Ok(entries),
                 Err(e) => {
-                    if attempt + 1 < max_retries {
-                        tracing::warn!(attempt = attempt + 1, error = %e, "parse failed, retrying");
-                    } else {
-                        return Err(e);
-                    }
+                    tracing::warn!(attempt = attempt + 1, error = %e, "parse failed");
+                    last_err = Some(e);
                 }
             },
             Err(e) => {
-                if attempt + 1 < max_retries {
-                    tracing::warn!(attempt = attempt + 1, error = %e, "LLM call failed, retrying");
-                } else {
-                    return Err(e);
-                }
+                tracing::warn!(attempt = attempt + 1, error = %e, "LLM call failed");
+                last_err = Some(e);
             }
         }
     }
 
-    Ok(Vec::new())
+    Err(last_err.unwrap_or_else(|| Error::Internal("extraction retries exhausted".to_owned())))
 }
 
-fn parse_entries_response(llm: &Arc<dyn LlmClient>, response: &str) -> Result<Vec<MemoryEntry>> {
-    let data = llm.extract_json(response)?;
+fn parse_entries_response(response: &str) -> Result<Vec<MemoryEntry>> {
+    let data = extract_json_from_text(response)?;
     let arr = data
         .as_array()
         .ok_or_else(|| Error::JsonParse("expected JSON array".to_owned()))?;

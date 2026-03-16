@@ -55,9 +55,8 @@ use tokio::sync::Mutex;
 /// Wraps the three-stage pipeline (compression, synthesis, retrieval)
 /// behind a simple async API.
 pub struct Meme {
-    llm: Arc<dyn LlmClient>,
-    embedding: Arc<dyn EmbeddingProvider>,
     store: Arc<dyn VectorStore>,
+    embedding: Arc<dyn EmbeddingProvider>,
     builder: Mutex<MemoryBuilder>,
     retriever: HybridRetriever,
     generator: AnswerGenerator,
@@ -308,9 +307,8 @@ impl MemeBuilder {
         tracing::info!("meme system initialized");
 
         Ok(Meme {
-            llm,
-            embedding,
             store,
+            embedding,
             builder: Mutex::new(mem_builder),
             retriever,
             generator,

@@ -16,7 +16,7 @@ meme = { path = "meme" }
 # Async runtime
 tokio = { version = "1.50.0", features = ["full"] }
 futures = "0.3.32"
-async-trait = "0.1.89"
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0.228", features = ["derive"] }

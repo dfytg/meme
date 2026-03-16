@@ -3,5 +3,5 @@
 pub mod client;
 pub mod prompt;
 
-pub use client::{ChatOptions, LlmClient, Message, OpenAiClient, Role};
+pub use client::{ChatOptions, LlmClient, Message, OpenAiClient, Role, extract_json_from_text};
 pub use prompt::Prompts;

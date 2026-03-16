@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::config::PipelineConfig;
 use crate::embedding::EmbeddingProvider;
 use crate::error::Result;
-use crate::llm::client::{ChatOptions, LlmClient, Message};
+use crate::llm::client::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::llm::prompt::Prompts;
 use crate::model::{MemoryEntry, MetadataFilter};
 use crate::store::VectorStore;
@@ -228,7 +228,7 @@ impl HybridRetriever {
             json_mode: false,
         };
         let response = self.llm.chat(&messages, &opts).await?;
-        self.llm.extract_json(&response)
+        extract_json_from_text(&response)
     }
 
     async fn generate_targeted_queries(
@@ -250,7 +250,7 @@ impl HybridRetriever {
         };
 
         let response = self.llm.chat(&messages, &opts).await?;
-        let result = self.llm.extract_json(&response)?;
+        let result = extract_json_from_text(&response)?;
 
         let mut queries: Vec<String> = result["queries"]
             .as_array()
@@ -282,7 +282,7 @@ impl HybridRetriever {
         };
 
         match self.llm.chat(&messages, &opts).await {
-            Ok(response) => self.llm.extract_json(&response),
+            Ok(response) => extract_json_from_text(&response),
             Err(e) => {
                 tracing::warn!(error = %e, "query analysis failed, using fallback");
                 Ok(serde_json::json!({
@@ -368,7 +368,7 @@ impl HybridRetriever {
             json_mode: false,
         };
         let response = self.llm.chat(&messages, &opts).await?;
-        self.llm.extract_json(&response)
+        extract_json_from_text(&response)
     }
 
     async fn generate_missing_queries(
@@ -389,7 +389,7 @@ impl HybridRetriever {
             json_mode: false,
         };
         let response = self.llm.chat(&messages, &opts).await?;
-        let result = self.llm.extract_json(&response)?;
+        let result = extract_json_from_text(&response)?;
 
         Ok(result["targeted_queries"]
             .as_array()

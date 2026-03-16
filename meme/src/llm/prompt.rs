@@ -3,7 +3,7 @@
 use crate::model::MemoryEntry;
 
 /// Collection of prompt templates used throughout the pipeline.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Prompts;
 
 impl Prompts {

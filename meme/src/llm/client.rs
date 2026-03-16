@@ -82,15 +82,6 @@ pub trait LlmClient: Send + Sync {
     ///
     /// Returns an error if the API call fails after retries.
     async fn chat(&self, messages: &[Message], opts: &ChatOptions) -> Result<String>;
-
-    /// Extract a JSON value from an LLM response string.
-    ///
-    /// Handles common LLM output quirks: markdown fences, prefixes, trailing commas.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no valid JSON can be extracted.
-    fn extract_json(&self, text: &str) -> Result<serde_json::Value>;
 }
 
 /// OpenAI-compatible HTTP client.
@@ -196,10 +187,6 @@ impl LlmClient for OpenAiClient {
         }
         Err(last_err.unwrap_or_else(|| Error::Llm("all retries exhausted".to_owned())))
     }
-
-    fn extract_json(&self, text: &str) -> Result<serde_json::Value> {
-        extract_json_from_text(text)
-    }
 }
 
 /// Extract a JSON value from text that may contain markdown fences and other noise.
@@ -294,12 +281,15 @@ fn parse_with_cleanup(json_str: &str) -> std::result::Result<serde_json::Value, 
 }
 
 fn cleanup_json(s: &str) -> String {
-    // Remove trailing commas before } or ].
-    let re = regex::Regex::new(r",(\s*[}\]])").expect("valid regex");
-    let s = re.replace_all(s, "$1");
-    // Remove single-line comments.
-    let re2 = regex::Regex::new(r"//.*$").expect("valid regex");
-    re2.replace_all(&s, "").trim().to_owned()
+    use std::sync::LazyLock;
+
+    static RE_TRAILING_COMMA: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r",(\s*[}\]])").expect("valid regex"));
+    static RE_LINE_COMMENT: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"//.*$").expect("valid regex"));
+
+    let s = RE_TRAILING_COMMA.replace_all(s, "$1");
+    RE_LINE_COMMENT.replace_all(&s, "").trim().to_owned()
 }
 
 fn extract_balanced_json(text: &str, start_char: char) -> Option<serde_json::Value> {

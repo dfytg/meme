@@ -57,14 +57,7 @@ impl ImportCmd {
         let content = std::fs::read_to_string(&self.file)?;
         let entries: Vec<meme::model::MemoryEntry> = serde_json::from_str(&content)?;
 
-        let meme = meme::MemeBuilder::new()
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-
         let count = entries.len();
-        // Re-add as dialogues is not applicable for direct entries;
-        // for now we just report the count.
         println!("Parsed {count} entries from {}", self.file);
         println!("Note: Direct entry import requires embedding recomputation.");
         println!("Use `meme add --file` for JSONL dialogue import instead.");
