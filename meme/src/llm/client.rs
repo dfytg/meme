@@ -56,7 +56,7 @@ impl Message {
 }
 
 /// Options for a chat completion request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ChatOptions {
     /// Temperature for generation.
     pub temperature: f32,
@@ -100,7 +100,6 @@ pub struct OpenAiClient {
     base_url: String,
     api_key: String,
     model: String,
-    streaming: bool,
     max_retries: u32,
 }
 
@@ -121,7 +120,6 @@ impl OpenAiClient {
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             api_key,
             model: config.model.clone(),
-            streaming: config.streaming,
             max_retries: config.max_retries,
         })
     }
@@ -138,7 +136,6 @@ impl OpenAiClient {
             base_url: base_url.into().trim_end_matches('/').to_owned(),
             api_key: api_key.into(),
             model: model.into(),
-            streaming: true,
             max_retries: 3,
         }
     }

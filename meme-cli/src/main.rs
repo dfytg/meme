@@ -1,6 +1,6 @@
 //! meme-cli — interactive management tool for the meme memory system.
 
-mod cmd;
+mod commands;
 
 use clap::{Parser, Subcommand};
 
@@ -15,21 +15,21 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Initialize configuration and database.
-    Init(cmd::init::InitCmd),
+    Init(commands::init::InitCmd),
     /// Add dialogues to the memory system.
-    Add(cmd::add::AddCmd),
+    Add(commands::add::AddCmd),
     /// Ask a question against stored memories.
-    Ask(cmd::ask::AskCmd),
+    Ask(commands::ask::AskCmd),
     /// List stored memory entries.
-    List(cmd::list::ListCmd),
+    List(commands::list::ListCmd),
     /// Manage cross-session memory.
-    Session(cmd::session::SessionCmd),
+    Session(commands::session::SessionCmd),
     /// Manually trigger memory consolidation.
-    Consolidate(cmd::consolidate::ConsolidateCmd),
+    Consolidate(commands::consolidate::ConsolidateCmd),
     /// Export memory entries to JSON.
-    Export(cmd::export::ExportCmd),
+    Export(commands::export::ExportCmd),
     /// Import memory entries from a JSON file.
-    Import(cmd::export::ImportCmd),
+    Import(commands::export::ImportCmd),
 }
 
 fn main() {

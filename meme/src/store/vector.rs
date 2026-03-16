@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use arrow_array::types::Float32Type;
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
     StringArray,

@@ -272,7 +272,7 @@ impl ContextBundle {
 }
 
 /// Report returned when a session finishes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct FinalizationReport {
     /// Session that was finalized.
     pub memory_session_id: Uuid,

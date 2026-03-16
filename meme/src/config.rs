@@ -201,7 +201,7 @@ impl Default for StoreConfig {
 }
 
 /// Pipeline parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PipelineConfig {
     /// Number of dialogues per processing window.
@@ -238,7 +238,7 @@ impl Default for PipelineConfig {
 }
 
 /// Parallel processing configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ParallelConfig {
     /// Max concurrent workers for memory building.

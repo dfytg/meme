@@ -14,7 +14,7 @@ use crate::model::ConsolidationRun;
 use crate::store::SqliteStore;
 
 /// Configurable parameters for a single consolidation pass.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ConsolidationPolicy {
     /// Entries older than this (days) receive importance decay.
     pub max_age_days: u32,
@@ -55,7 +55,7 @@ impl ConsolidationPolicy {
 }
 
 /// Statistics from a consolidation run.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct ConsolidationStats {
     /// Number of entries whose importance was decayed.
     pub decayed: usize,
