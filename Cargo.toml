@@ -11,6 +11,55 @@ repository = "https://github.com/qntx/meme"
 description = "Long term memory for AI agents."
 
 [workspace.dependencies]
+meme = { path = "meme" }
+
+# Async runtime
+tokio = { version = "1.50.0", features = ["full"] }
+futures = "0.3.32"
+async-trait = "0.1.89"
+
+# Serialization
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+
+# HTTP client
+reqwest = { version = "0.13.2", features = ["json", "stream"] }
+reqwest-eventsource = "0.6.0"
+
+# Vector database
+lancedb = "0.26.2"
+arrow = { version = "58.0.0", default-features = false }
+arrow-array = "58.0.0"
+arrow-schema = "58.0.0"
+
+# Full-text search
+tantivy = "0.25.0"
+
+# SQLite
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+
+# Embedding (local ONNX, optional)
+ort = { version = "2.0.0-rc.12" }
+tokenizers = { version = "0.22.2"}
+
+# CLI
+clap = { version = "4.6.0", features = ["derive"] }
+comfy-table = "7.2.2"
+indicatif = "0.18.4"
+
+# Config
+toml = "0.9.8"
+directories = "6.0.0"
+
+# Utilities
+uuid = { version = "1.22.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.44", features = ["serde"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+thiserror = "2.0.18"
+regex = "1.12.3"
+anyhow = "1"
+ndarray = "0.17.2"
 
 [profile.release]
 codegen-units = 1

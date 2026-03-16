@@ -6,7 +6,43 @@ license.workspace = true
 repository.workspace = true
 description.workspace = true
 
+[features]
+default = ["api-embedding"]
+api-embedding = []
+onnx = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
+
 [dependencies]
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+
+reqwest.workspace = true
+reqwest-eventsource.workspace = true
+
+lancedb.workspace = true
+arrow.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+
+tantivy.workspace = true
+
+rusqlite.workspace = true
+
+ort = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+ndarray = { workspace = true, optional = true }
+
+toml.workspace = true
+directories.workspace = true
+
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+regex.workspace = true
 
 [lints]
 workspace = true

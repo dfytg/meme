@@ -1,14 +1,321 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+//! # meme
+//!
+//! Long-term memory for AI agents.
+//!
+//! A Rust implementation of the SimpleMem three-stage pipeline:
+//! 1. **Semantic Structured Compression** — dialogues → compact memory entries
+//! 2. **Online Semantic Synthesis** — deduplication during write
+//! 3. **Intent-Aware Retrieval Planning** — multi-view hybrid retrieval
+//!
+//! Plus a full cross-session memory system for persistent memory across conversations.
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use meme::{Meme, MemeBuilder};
+//!
+//! # async fn example() -> meme::error::Result<()> {
+//! let meme = MemeBuilder::new()
+//!     .api_key("sk-...")
+//!     .model("gpt-4.1-mini")
+//!     .build()
+//!     .await?;
+//!
+//! meme.add_dialogue("Alice", "Let's meet at 2pm tomorrow", None).await?;
+//! meme.finalize().await?;
+//!
+//! let answer = meme.ask("When will Alice meet?").await?;
+//! # Ok(())
+//! # }
+//! ```
+
+pub mod config;
+pub mod cross;
+pub mod embedding;
+pub mod error;
+pub mod llm;
+pub mod model;
+pub mod pipeline;
+pub mod store;
+
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
+use config::Config;
+use embedding::{ApiEmbedding, EmbeddingProvider};
+use error::{Error, Result};
+use llm::client::{LlmClient, OpenAiClient};
+use model::{Dialogue, MemoryEntry};
+use pipeline::{AnswerGenerator, HybridRetriever, MemoryBuilder};
+use store::{LanceDbStore, VectorStore};
+use tokio::sync::Mutex;
+
+/// The main entry point for the meme memory system.
+///
+/// Wraps the three-stage pipeline (compression, synthesis, retrieval)
+/// behind a simple async API.
+pub struct Meme {
+    llm: Arc<dyn LlmClient>,
+    embedding: Arc<dyn EmbeddingProvider>,
+    store: Arc<dyn VectorStore>,
+    builder: Mutex<MemoryBuilder>,
+    retriever: HybridRetriever,
+    generator: AnswerGenerator,
+    config: Config,
+    dialogue_counter: Mutex<u64>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl std::fmt::Debug for Meme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Meme")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl Meme {
+    /// Create a builder for configuring a new `Meme` instance.
+    #[must_use]
+    pub fn builder() -> MemeBuilder {
+        MemeBuilder::new()
+    }
+
+    /// Add a single dialogue turn.
+    ///
+    /// When the internal buffer reaches `window_size`, entries are automatically
+    /// extracted and stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if LLM extraction or storage fails.
+    pub async fn add_dialogue(
+        &self,
+        speaker: &str,
+        content: &str,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let id = {
+            let mut counter = self.dialogue_counter.lock().await;
+            *counter += 1;
+            *counter
+        };
+
+        let mut dialogue = Dialogue::new(id, speaker, content);
+        if let Some(ts) = timestamp {
+            dialogue = dialogue.with_timestamp(ts);
+        }
+
+        let mut builder = self.builder.lock().await;
+        let entries = builder.add_dialogue(dialogue).await?;
+        if !entries.is_empty() {
+            self.store_entries(&entries).await?;
+        }
+        Ok(())
+    }
+
+    /// Batch add dialogues.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if LLM extraction or storage fails.
+    pub async fn add_dialogues(&self, dialogues: Vec<Dialogue>) -> Result<()> {
+        let mut builder = self.builder.lock().await;
+        let entries = builder.add_dialogues(dialogues).await?;
+        if !entries.is_empty() {
+            self.store_entries(&entries).await?;
+        }
+        Ok(())
+    }
+
+    /// Process any remaining dialogues in the buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if LLM extraction or storage fails.
+    pub async fn finalize(&self) -> Result<()> {
+        let mut builder = self.builder.lock().await;
+        let entries = builder.finalize().await?;
+        if !entries.is_empty() {
+            self.store_entries(&entries).await?;
+        }
+        Ok(())
+    }
+
+    /// Ask a question — the core Q&A interface.
+    ///
+    /// Executes intent-aware retrieval planning, multi-view hybrid search,
+    /// and generates a concise answer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if retrieval or answer generation fails.
+    pub async fn ask(&self, question: &str) -> Result<String> {
+        tracing::info!(question, "processing question");
+        let contexts = self.retriever.retrieve(question).await?;
+        let answer = self.generator.generate(question, &contexts).await?;
+        tracing::info!(question, answer = answer.as_str(), "answer generated");
+        Ok(answer)
+    }
+
+    /// Get all stored memory entries (for debugging).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the read operation fails.
+    pub async fn get_all_memories(&self) -> Result<Vec<MemoryEntry>> {
+        self.store.get_all().await
+    }
+
+    /// Count stored memory entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the count operation fails.
+    pub async fn memory_count(&self) -> Result<usize> {
+        self.store.count().await
+    }
+
+    /// Clear all stored memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the clear operation fails.
+    pub async fn clear(&self) -> Result<()> {
+        self.store.clear().await
+    }
+
+    /// Get a reference to the configuration.
+    #[must_use]
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    async fn store_entries(&self, entries: &[MemoryEntry]) -> Result<()> {
+        let texts: Vec<&str> = entries.iter().map(|e| e.restatement.as_str()).collect();
+        let vectors = self.embedding.encode_documents(&texts).await?;
+        self.store.add_entries(entries, &vectors).await
+    }
+}
+
+/// Builder for constructing a [`Meme`] instance.
+#[derive(Debug, Default)]
+pub struct MemeBuilder {
+    config: Option<Config>,
+    api_key: Option<String>,
+    model: Option<String>,
+    base_url: Option<String>,
+    clear_db: bool,
+}
+
+impl MemeBuilder {
+    /// Create a new builder with defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set a full configuration.
+    #[must_use]
+    pub fn config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Set the LLM API key (overrides config).
+    #[must_use]
+    pub fn api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    /// Set the LLM model name (overrides config).
+    #[must_use]
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    /// Set the LLM base URL (overrides config).
+    #[must_use]
+    pub fn base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = Some(url.into());
+        self
+    }
+
+    /// Clear the database on initialization.
+    #[must_use]
+    pub fn clear_db(mut self, clear: bool) -> Self {
+        self.clear_db = clear;
+        self
+    }
+
+    /// Build the `Meme` instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if configuration is invalid or storage cannot be initialized.
+    pub async fn build(self) -> Result<Meme> {
+        let mut config = self
+            .config
+            .unwrap_or_else(|| Config::load_default().unwrap_or_default());
+
+        // Apply overrides.
+        if let Some(key) = self.api_key {
+            config.llm.api_key = Some(key);
+        }
+        if let Some(model) = self.model {
+            config.llm.model = model;
+        }
+        if let Some(url) = self.base_url {
+            config.llm.base_url = url;
+        }
+
+        // Build components.
+        let llm: Arc<dyn LlmClient> = Arc::new(OpenAiClient::from_config(&config.llm)?);
+
+        let embedding: Arc<dyn EmbeddingProvider> =
+            Arc::new(ApiEmbedding::from_config(&config.embedding, &config.llm)?);
+
+        let store: Arc<dyn VectorStore> = Arc::new(
+            LanceDbStore::open(
+                &config.store.lancedb_path,
+                &config.store.table_name,
+                embedding.clone(),
+            )
+            .await?,
+        );
+
+        if self.clear_db {
+            store.clear().await?;
+        }
+
+        let mem_builder = MemoryBuilder::new(
+            Arc::clone(&llm),
+            &config.pipeline,
+            config.parallel.max_build_workers,
+        );
+
+        let retriever = HybridRetriever::new(
+            Arc::clone(&llm),
+            Arc::clone(&store),
+            Arc::clone(&embedding),
+            &config.pipeline,
+            config.parallel.max_retrieval_workers,
+        );
+
+        let generator = AnswerGenerator::new(Arc::clone(&llm));
+
+        tracing::info!("meme system initialized");
+
+        Ok(Meme {
+            llm,
+            embedding,
+            store,
+            builder: Mutex::new(mem_builder),
+            retriever,
+            generator,
+            config,
+            dialogue_counter: Mutex::new(0),
+        })
     }
 }
