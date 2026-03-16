@@ -8,7 +8,7 @@ use arrow_array::{
     StringArray,
 };
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use lancedb::query::ExecutableQuery;
+use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::embedding::EmbeddingProvider;
 use crate::error::{Error, Result};
