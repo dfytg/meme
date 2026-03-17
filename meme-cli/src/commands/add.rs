@@ -1,15 +1,18 @@
-//! `meme add` — add dialogues to the memory system.
+//! `meme add` — add dialogues or raw facts to the memory system.
 
 use clap::Args;
 
-/// Add dialogues to the memory system.
+/// Add a dialogue or raw fact to the memory system.
+///
+/// Without `--speaker`, stores content as a direct fact (bypasses dialogue windowing).
+/// With `--speaker`, stores as a dialogue turn.
 #[derive(Debug, Args)]
 pub struct AddCmd {
-    /// Speaker name.
+    /// Speaker name (omit for direct fact ingestion).
     #[arg(short, long)]
     pub speaker: Option<String>,
 
-    /// Dialogue content (positional).
+    /// Content text (positional).
     pub content: Option<String>,
 
     /// Timestamp in ISO 8601 format.
@@ -34,7 +37,7 @@ impl AddCmd {
     ///
     /// # Errors
     ///
-    /// Returns an error if adding dialogues fails.
+    /// Returns an error if adding fails.
     pub async fn run(&self) -> anyhow::Result<()> {
         if let Some(file_path) = &self.file {
             self.import_file(file_path).await
@@ -44,44 +47,41 @@ impl AddCmd {
     }
 
     async fn add_single(&self) -> anyhow::Result<()> {
-        let speaker = self.speaker.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("--speaker is required when adding a single dialogue")
-        })?;
         let content = self
             .content
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("content is required"))?;
 
-        let timestamp = self
-            .timestamp
-            .as_deref()
-            .map(|s| {
-                chrono::DateTime::parse_from_rfc3339(s)
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
-                    .map_err(|e| anyhow::anyhow!("invalid timestamp: {e}"))
-            })
-            .transpose()?;
+        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
-        let mut builder = meme::MemeBuilder::new();
-        if let Some(uid) = &self.user_id {
-            builder = builder.user_id(uid);
-        }
-        if let Some(sid) = &self.session_id {
-            builder = builder.session_id(sid);
-        }
-        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
-        meme.add_dialogue(speaker, content, timestamp)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        if let Some(speaker) = &self.speaker {
+            let timestamp = self
+                .timestamp
+                .as_deref()
+                .map(|s| {
+                    chrono::DateTime::parse_from_rfc3339(s)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .map_err(|e| anyhow::anyhow!("invalid timestamp: {e}"))
+                })
+                .transpose()?;
 
-        println!("Added dialogue from {speaker}");
+            meme.add_dialogue(speaker, content, timestamp)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Added dialogue from {speaker}");
+        } else {
+            meme.add(content)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Added fact");
+        }
         Ok(())
     }
 
     async fn import_file(&self, path: &str) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(path)?;
         let mut dialogues = Vec::new();
-        let mut id = 1u64;
+        let mut line_num = 1u64;
 
         for line in content.lines() {
             let line = line.trim();
@@ -89,33 +89,26 @@ impl AddCmd {
                 continue;
             }
             let v: serde_json::Value = serde_json::from_str(line)
-                .map_err(|e| anyhow::anyhow!("invalid JSONL at line {id}: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("invalid JSONL at line {line_num}: {e}"))?;
 
             let speaker = v["speaker"].as_str().unwrap_or("unknown").to_owned();
-            let content = v["content"].as_str().unwrap_or("").to_owned();
+            let text = v["content"].as_str().unwrap_or("").to_owned();
             let timestamp = v["timestamp"].as_str().and_then(|s| {
                 chrono::DateTime::parse_from_rfc3339(s)
                     .ok()
                     .map(|dt| dt.with_timezone(&chrono::Utc))
             });
 
-            let mut d = meme::model::Dialogue::new(speaker, content);
+            let mut d = meme::model::Dialogue::new(speaker, text);
             if let Some(ts) = timestamp {
                 d = d.with_timestamp(ts);
             }
             dialogues.push(d);
-            id += 1;
+            line_num += 1;
         }
 
         let count = dialogues.len();
-        let mut builder = meme::MemeBuilder::new();
-        if let Some(uid) = &self.user_id {
-            builder = builder.user_id(uid);
-        }
-        if let Some(sid) = &self.session_id {
-            builder = builder.session_id(sid);
-        }
-        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
         meme.add_dialogues(dialogues)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;

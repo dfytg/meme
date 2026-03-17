@@ -25,14 +25,7 @@ impl ExportCmd {
     ///
     /// Returns an error if the export fails.
     pub async fn run(&self) -> anyhow::Result<()> {
-        let mut builder = meme::MemeBuilder::new();
-        if let Some(uid) = &self.user_id {
-            builder = builder.user_id(uid);
-        }
-        if let Some(sid) = &self.session_id {
-            builder = builder.session_id(sid);
-        }
-        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
         let entries = meme.get_all().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -80,14 +73,7 @@ impl ImportCmd {
             self.file
         );
 
-        let mut builder = meme::MemeBuilder::new();
-        if let Some(uid) = &self.user_id {
-            builder = builder.user_id(uid);
-        }
-        if let Some(sid) = &self.session_id {
-            builder = builder.session_id(sid);
-        }
-        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
         meme.import_entries(&mut entries)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;

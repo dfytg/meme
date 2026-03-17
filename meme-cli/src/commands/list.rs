@@ -30,14 +30,7 @@ impl ListCmd {
     ///
     /// Returns an error if the query fails.
     pub async fn run(&self) -> anyhow::Result<()> {
-        let mut builder = meme::MemeBuilder::new();
-        if let Some(uid) = &self.user_id {
-            builder = builder.user_id(uid);
-        }
-        if let Some(sid) = &self.session_id {
-            builder = builder.session_id(sid);
-        }
-        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
         let entries = meme.get_all().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -48,7 +41,7 @@ impl ListCmd {
             println!("{}", serde_json::to_string_pretty(&limited)?);
         } else {
             let mut table = Table::new();
-            table.set_header(vec!["#", "Restatement", "Persons", "Time", "Topic"]);
+            table.set_header(vec!["#", "ID", "Restatement", "Persons", "Time", "Topic"]);
 
             for (i, entry) in entries.iter().take(self.limit).enumerate() {
                 let restatement = if entry.restatement.len() > 80 {
@@ -59,6 +52,7 @@ impl ListCmd {
 
                 table.add_row(vec![
                     Cell::new(i + 1),
+                    Cell::new(&entry.id.to_string()[..8]),
                     Cell::new(restatement),
                     Cell::new(entry.persons.join(", ")),
                     Cell::new(

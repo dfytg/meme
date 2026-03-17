@@ -18,10 +18,20 @@ struct Cli {
 enum Command {
     /// Initialize configuration and database.
     Init(commands::init::InitCmd),
-    /// Add dialogues to the memory system.
+    /// Add a dialogue or raw fact to the memory system.
     Add(commands::add::AddCmd),
     /// Ask a question against stored memories.
     Ask(commands::ask::AskCmd),
+    /// Semantic search over stored memories.
+    Search(commands::search::SearchCmd),
+    /// Retrieve a single memory entry by UUID.
+    Get(commands::get::GetCmd),
+    /// Update a memory entry's content.
+    Update(commands::update::UpdateCmd),
+    /// Delete a memory entry by UUID.
+    Delete(commands::delete::DeleteCmd),
+    /// View the change history of a memory entry.
+    History(commands::history::HistoryCmd),
     /// List stored memory entries.
     List(commands::list::ListCmd),
     /// Export memory entries to JSON.
@@ -39,13 +49,17 @@ fn main() {
         .init();
 
     let cli = Cli::parse();
-
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
 
     let result = match cli.command {
         Command::Init(cmd) => cmd.run().map_err(|e| e.to_string()),
         Command::Add(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Ask(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
+        Command::Search(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
+        Command::Get(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
+        Command::Update(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
+        Command::Delete(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
+        Command::History(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::List(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Export(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Import(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
