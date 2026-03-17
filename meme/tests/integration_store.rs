@@ -256,3 +256,72 @@ async fn get_all_with_vectors_roundtrip() {
         assert!((a - b).abs() < 1e-5);
     }
 }
+
+#[tokio::test]
+async fn update_entry_replaces_content() {
+    let store = temp_store(4).await;
+    let scope = Scope::default();
+    let entry = dummy_entry("original text");
+    let id = entry.id;
+    let v = vec![0.1, 0.2, 0.3, 0.4];
+    store
+        .add_entries(&[entry], std::slice::from_ref(&v))
+        .await
+        .unwrap();
+
+    let mut updated = store.get_by_id(id).await.unwrap().unwrap();
+    assert_eq!(updated.restatement, "original text");
+
+    updated.restatement = "updated text".to_owned();
+    let new_v = vec![0.5, 0.6, 0.7, 0.8];
+    store.update_entry(&updated, &new_v).await.unwrap();
+
+    let fetched = store.get_by_id(id).await.unwrap().unwrap();
+    assert_eq!(fetched.restatement, "updated text");
+    assert_eq!(store.count(&scope).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn history_store_record_and_query() {
+    let dir = std::env::temp_dir().join(format!("meme_hist_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db_path = dir.join("history.db");
+    let store = meme::store::HistoryStore::open(&db_path).unwrap();
+
+    let mem_id = uuid::Uuid::new_v4();
+    store
+        .record(mem_id, meme::model::EventType::Add, None, Some("hello"))
+        .await
+        .unwrap();
+    store
+        .record(
+            mem_id,
+            meme::model::EventType::Update,
+            Some("hello"),
+            Some("hello world"),
+        )
+        .await
+        .unwrap();
+    store
+        .record(
+            mem_id,
+            meme::model::EventType::Delete,
+            Some("hello world"),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let events = store.get_history(mem_id).await.unwrap();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0].event_type.as_str(), "add");
+    assert_eq!(events[1].event_type.as_str(), "update");
+    assert_eq!(events[2].event_type.as_str(), "delete");
+    assert_eq!(events[0].new_content.as_deref(), Some("hello"));
+    assert_eq!(events[1].old_content.as_deref(), Some("hello"));
+    assert_eq!(events[1].new_content.as_deref(), Some("hello world"));
+
+    let other_id = uuid::Uuid::new_v4();
+    let empty = store.get_history(other_id).await.unwrap();
+    assert!(empty.is_empty());
+}

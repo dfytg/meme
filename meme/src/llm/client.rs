@@ -106,14 +106,56 @@ impl LlmClient {
         })
     }
 
-    /// Send a chat completion request and return the response text.
+    /// Send a chat completion and deserialize the response into `T`.
     ///
-    /// Retries with exponential backoff on transient failures.
+    /// Uses `json_object` response format + `serde_json::from_str` for type-safe parsing.
+    /// Retries with exponential backoff on transient or parse failures.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API call fails after retries or the response
+    /// cannot be deserialized into `T`.
+    #[tracing::instrument(skip(self, messages, opts), fields(model = %self.model))]
+    pub async fn chat_structured<T: serde::de::DeserializeOwned>(
+        &self,
+        messages: &[Message],
+        opts: &ChatOptions,
+    ) -> Result<T> {
+        let mut last_err = None;
+        for attempt in 0..self.max_retries {
+            match self.call_api(messages, opts).await {
+                Ok(content) => match serde_json::from_str::<T>(&content) {
+                    Ok(parsed) => return Ok(parsed),
+                    Err(e) => {
+                        tracing::warn!(attempt = attempt + 1, error = %e, "JSON parse failed");
+                        if let Ok(v) = extract_json_from_text(&content)
+                            && let Ok(parsed) = serde_json::from_value::<T>(v)
+                        {
+                            return Ok(parsed);
+                        }
+                        last_err = Some(Error::JsonParse(format!("{e}")));
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(attempt = attempt + 1, error = %e, "LLM API call failed");
+                    last_err = Some(e);
+                }
+            }
+            if attempt + 1 < self.max_retries {
+                let wait = 1u64 << attempt;
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+            }
+        }
+        Err(last_err.unwrap_or_else(|| Error::llm("all retries exhausted")))
+    }
+
+    /// Send a chat completion and return the raw response text.
+    ///
+    /// Prefer [`chat_structured`] for JSON responses.
     ///
     /// # Errors
     ///
     /// Returns an error if the API call fails after retries.
-    #[tracing::instrument(skip(self, messages, opts), fields(model = %self.model))]
     pub async fn chat(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
         let mut last_err = None;
         for attempt in 0..self.max_retries {

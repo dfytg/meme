@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::embedding::Embedder;
 use crate::error::{Error, Result};
-use crate::llm::{self, LlmClient};
+use crate::llm::{self, LlmClient, ReExtractResponse, ReconcileResponse};
 use crate::model::{Dialogue, EventType, MemoryEntry, MemoryEvent};
 use crate::pipeline::{self, HybridRetriever, MemoryBuilder};
 use crate::store::{HistoryStore, Scope, VectorStore};
@@ -215,47 +215,15 @@ impl Meme {
             temperature: 0.0,
             json_mode: true,
         };
-        let Ok(response) = self.llm.chat(&messages, &opts).await else {
-            tracing::warn!("metadata re-extraction LLM call failed, keeping existing fields");
-            return;
-        };
-        let Ok(data) = llm::extract_json_from_text(&response) else {
-            tracing::warn!("metadata re-extraction parse failed, keeping existing fields");
-            return;
-        };
-
-        if let Some(kw) = data["keywords"].as_array() {
-            entry.keywords = kw
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
-        }
-        if let Some(ps) = data["persons"].as_array() {
-            entry.persons = ps
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
-        }
-        if let Some(es) = data["entities"].as_array() {
-            entry.entities = es
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
-        }
-        entry.location = data["location"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
-            .map(String::from);
-        entry.topic = data["topic"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
-            .map(String::from);
-        if let Some(ts) = data["timestamp"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
-            && let Ok(dt) = DateTime::parse_from_rfc3339(ts)
+        match self
+            .llm
+            .chat_structured::<ReExtractResponse>(&messages, &opts)
+            .await
         {
-            entry.timestamp = Some(dt.with_timezone(&Utc));
+            Ok(resp) => resp.apply_to(entry),
+            Err(e) => {
+                tracing::warn!(error = %e, "metadata re-extraction failed, keeping existing fields");
+            }
         }
     }
 
@@ -479,36 +447,25 @@ impl Meme {
             json_mode: true,
         };
 
-        let response = self.llm.chat(&messages, &opts).await?;
-        let data = llm::extract_json_from_text(&response)?;
-
-        let actions = data["actions"]
-            .as_array()
-            .or_else(|| {
-                data.as_object()
-                    .and_then(|obj| obj.values().find_map(|v| v.as_array()))
-            })
-            .cloned()
-            .unwrap_or_default();
+        let resp: ReconcileResponse = self.llm.chat_structured(&messages, &opts).await?;
 
         let mut accepted = Vec::new();
         let mut accepted_vecs = Vec::new();
         let mut ids_to_delete = Vec::new();
 
-        for action_val in &actions {
-            let Some(new_idx) = parse_index(&action_val["new_index"]) else {
+        for action in &resp.actions {
+            let Some(new_idx) = action.new_index else {
                 continue;
             };
-            let act = action_val["action"].as_str().unwrap_or("add");
-            let existing_idx = parse_index(&action_val["existing_index"]);
-
             if new_idx >= entries.len() {
                 continue;
             }
 
-            let target_uid = existing_idx.and_then(|eidx| idx_to_uuid.get(&eidx));
+            let target_uid = action
+                .existing_index
+                .and_then(|eidx| idx_to_uuid.get(&eidx));
 
-            match act {
+            match action.action.as_str() {
                 "update" => {
                     if let Some(uid) = target_uid {
                         ids_to_delete.push(uid.to_string());
@@ -534,10 +491,7 @@ impl Meme {
             }
         }
 
-        let handled: HashSet<usize> = actions
-            .iter()
-            .filter_map(|a| parse_index(&a["new_index"]))
-            .collect();
+        let handled: HashSet<usize> = resp.actions.iter().filter_map(|a| a.new_index).collect();
         for (i, entry) in entries.iter().enumerate() {
             if !handled.contains(&i) {
                 accepted.push(entry.clone());
@@ -550,11 +504,4 @@ impl Meme {
 
         Ok((accepted, accepted_vecs, ids_to_delete))
     }
-}
-
-/// Parse a JSON value as a `usize` index, tolerating both integers and string digits.
-fn parse_index(val: &serde_json::Value) -> Option<usize> {
-    val.as_u64()
-        .map(|v| v as usize)
-        .or_else(|| val.as_str().and_then(|s| s.parse::<usize>().ok()))
 }

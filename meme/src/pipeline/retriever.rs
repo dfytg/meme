@@ -9,7 +9,10 @@ use std::sync::Arc;
 use crate::config::PipelineConfig;
 use crate::embedding::Embedder;
 use crate::error::Result;
-use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text, prompt};
+use crate::llm::{
+    ChatOptions, CompletenessResponse, LlmClient, Message, MissingQueriesResponse, QueryPlan,
+    prompt,
+};
 use crate::model::{MemoryEntry, MetadataFilter};
 use crate::store::{Scope, VectorStore};
 
@@ -81,25 +84,15 @@ impl HybridRetriever {
 
     #[tracing::instrument(skip(self))]
     async fn retrieve_with_planning(&self, query: &str) -> Result<Vec<MemoryEntry>> {
-        // Single LLM call: unified query analysis + search planning.
         let plan = self.plan_query(query).await?;
 
-        // Extract search queries from plan.
-        let mut search_queries: Vec<String> = plan["search_queries"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut search_queries = plan.search_queries.clone();
         if !search_queries.iter().any(|q| q == query) {
             search_queries.insert(0, query.to_owned());
         }
         search_queries.truncate(5);
         tracing::info!(count = search_queries.len(), "targeted queries");
 
-        // Execute all three search views in parallel.
         let (semantic_results, keyword_results, structured_results) = tokio::join!(
             self.execute_semantic_searches(&search_queries),
             self.keyword_search(query, &plan),
@@ -127,68 +120,34 @@ impl HybridRetriever {
             .await
     }
 
-    async fn keyword_search(
-        &self,
-        query: &str,
-        analysis: &serde_json::Value,
-    ) -> Result<Vec<MemoryEntry>> {
-        let keywords: Vec<String> = analysis["keywords"].as_array().map_or_else(
-            || vec![query.to_owned()],
-            |a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            },
-        );
-
-        if keywords.is_empty() {
-            return Ok(Vec::new());
-        }
+    async fn keyword_search(&self, query: &str, plan: &QueryPlan) -> Result<Vec<MemoryEntry>> {
+        let keywords = if plan.keywords.is_empty() {
+            vec![query.to_owned()]
+        } else {
+            plan.keywords.clone()
+        };
         self.store
             .keyword_search(&keywords, self.keyword_top_k, &self.scope)
             .await
     }
 
-    async fn structured_search(&self, analysis: &serde_json::Value) -> Result<Vec<MemoryEntry>> {
-        let persons: Option<Vec<String>> = analysis["persons"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .filter(|v: &Vec<String>| !v.is_empty());
-
-        let location = analysis["location"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
-            .map(String::from);
-
-        let entities: Option<Vec<String>> = analysis["entities"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .filter(|v: &Vec<String>| !v.is_empty());
-
-        let timestamp_range = analysis["time_expression"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
+    async fn structured_search(&self, plan: &QueryPlan) -> Result<Vec<MemoryEntry>> {
+        let persons = Some(&plan.persons).filter(|v| !v.is_empty()).cloned();
+        let entities = Some(&plan.entities).filter(|v| !v.is_empty()).cloned();
+        let timestamp_range = plan
+            .time_expression
+            .as_deref()
             .and_then(|expr| parse_time_range(expr, chrono::Utc::now()));
 
         let filter = MetadataFilter {
             persons,
-            location,
+            location: plan.location.clone(),
             entities,
             timestamp_range,
         };
-
         if filter.is_empty() {
             return Ok(Vec::new());
         }
-
         self.store
             .structured_search(&filter, self.structured_top_k, &self.scope)
             .await
@@ -227,11 +186,11 @@ impl HybridRetriever {
         Ok(all_results)
     }
 
-    async fn plan_query(&self, query: &str) -> Result<serde_json::Value> {
+    async fn plan_query(&self, query: &str) -> Result<QueryPlan> {
         let prompt = prompt::query_plan(query);
         let messages = vec![
             Message::system(
-                "You are a query analysis and retrieval planning assistant. You must output valid JSON format.",
+                "You are a query analysis and retrieval planning assistant. Output valid JSON.",
             ),
             Message::user(prompt),
         ];
@@ -240,19 +199,19 @@ impl HybridRetriever {
             json_mode: true,
         };
 
-        match self.llm.chat(&messages, &opts).await {
-            Ok(response) => extract_json_from_text(&response),
+        match self
+            .llm
+            .chat_structured::<QueryPlan>(&messages, &opts)
+            .await
+        {
+            Ok(plan) => Ok(plan),
             Err(e) => {
                 tracing::warn!(error = %e, "query planning failed, using fallback");
-                Ok(serde_json::json!({
-                    "keywords": [query],
-                    "persons": [],
-                    "time_expression": null,
-                    "location": null,
-                    "entities": [],
-                    "required_info": [],
-                    "search_queries": [query]
-                }))
+                Ok(QueryPlan {
+                    keywords: vec![query.to_owned()],
+                    search_queries: vec![query.to_owned()],
+                    ..QueryPlan::default()
+                })
             }
         }
     }
@@ -261,10 +220,10 @@ impl HybridRetriever {
         &self,
         query: &str,
         initial_results: Vec<MemoryEntry>,
-        plan: &serde_json::Value,
+        plan: &QueryPlan,
     ) -> Result<Vec<MemoryEntry>> {
         let mut current = initial_results;
-        let required_info = serde_json::to_string(&plan["required_info"]).unwrap_or_default();
+        let required_info = plan.required_info.join(", ");
 
         for round in 0..self.max_reflection_rounds {
             if current.is_empty() {
@@ -273,13 +232,11 @@ impl HybridRetriever {
             }
 
             let context_str = prompt::format_contexts_compact(&current);
-            let assessment = self
+            let assessment: CompletenessResponse = self
                 .check_completeness(query, &context_str, &required_info)
                 .await?;
 
-            let status = assessment["assessment"].as_str().unwrap_or("incomplete");
-
-            if status == "complete" {
+            if assessment.assessment == "complete" {
                 tracing::info!(round = round + 1, "information complete");
                 break;
             }
@@ -316,20 +273,17 @@ impl HybridRetriever {
         query: &str,
         context_str: &str,
         required_info: &str,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<CompletenessResponse> {
         let prompt = prompt::completeness_check(query, context_str, required_info);
         let messages = vec![
-            Message::system(
-                "You are an information completeness evaluator. You must output valid JSON format.",
-            ),
+            Message::system("You are an information completeness evaluator. Output valid JSON."),
             Message::user(prompt),
         ];
         let opts = ChatOptions {
             temperature: 0.1,
             json_mode: true,
         };
-        let response = self.llm.chat(&messages, &opts).await?;
-        extract_json_from_text(&response)
+        self.llm.chat_structured(&messages, &opts).await
     }
 
     async fn generate_missing_queries(
@@ -340,26 +294,15 @@ impl HybridRetriever {
     ) -> Result<Vec<String>> {
         let prompt = prompt::missing_info_queries(query, context_str, required_info);
         let messages = vec![
-            Message::system(
-                "You are a missing information query generator. You must output valid JSON format.",
-            ),
+            Message::system("You are a missing information query generator. Output valid JSON."),
             Message::user(prompt),
         ];
         let opts = ChatOptions {
             temperature: 0.3,
             json_mode: true,
         };
-        let response = self.llm.chat(&messages, &opts).await?;
-        let result = extract_json_from_text(&response)?;
-
-        Ok(result["targeted_queries"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default())
+        let resp: MissingQueriesResponse = self.llm.chat_structured(&messages, &opts).await?;
+        Ok(resp.targeted_queries)
     }
 }
 

@@ -5,12 +5,9 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use uuid::Uuid;
-
 use crate::config::PipelineConfig;
 use crate::error::{Error, Result};
-use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text, prompt};
+use crate::llm::{ChatOptions, ExtractionResponse, LlmClient, Message, prompt};
 use crate::model::{Dialogue, MemoryEntry};
 
 /// Memory builder that implements Stage 1 (Semantic Structured Compression)
@@ -254,125 +251,19 @@ async fn generate_entries_standalone(
 
     let messages = vec![
         Message::system(
-            "You are a professional information extraction assistant, skilled at extracting structured, unambiguous information from conversations. You must output valid JSON format.",
+            "You are a professional information extraction assistant. You must output valid JSON.",
         ),
         Message::user(prompt),
     ];
-
     let opts = ChatOptions {
         temperature: 0.1,
         json_mode: true,
     };
 
-    let parse_retries = 2;
-    let mut last_err = None;
-    for attempt in 0..=parse_retries {
-        let response = match llm.chat(&messages, &opts).await {
-            Ok(r) => r,
-            Err(e) => return Err(e),
-        };
-        match parse_entries_response(&response) {
-            Ok(entries) => return Ok(entries),
-            Err(e) => {
-                tracing::warn!(attempt = attempt + 1, error = %e, "parse failed, retrying LLM");
-                last_err = Some(e);
-            }
-        }
-    }
-
-    Err(last_err
-        .unwrap_or_else(|| Error::Internal("extraction parse retries exhausted".to_owned())))
-}
-
-fn parse_entries_response(response: &str) -> Result<Vec<MemoryEntry>> {
-    let data = extract_json_from_text(response)?;
-
-    // Accept: {"entries": [...]}, any object wrapping an array, or a bare array.
-    let arr = if let Some(a) = data.as_array() {
-        a.clone()
-    } else if let Some(obj) = data.as_object() {
-        obj.get("entries")
-            .and_then(|v| v.as_array().cloned())
-            .or_else(|| obj.values().find_map(|v| v.as_array().cloned()))
-            .ok_or_else(|| Error::JsonParse("object contains no array field".to_owned()))?
-    } else {
-        return Err(Error::JsonParse("expected JSON array or object".to_owned()));
-    };
-
-    let mut entries = Vec::with_capacity(arr.len());
-    for item in arr {
-        let restatement = item["lossless_restatement"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned();
-        if restatement.is_empty() {
-            continue;
-        }
-
-        let keywords = item["keywords"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let timestamp = item["timestamp"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
-            .and_then(|s| {
-                DateTime::parse_from_rfc3339(s)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .or_else(|| {
-                        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
-                            .ok()
-                            .map(|ndt| ndt.and_utc())
-                    })
-            });
-
-        let location = item["location"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
-            .map(String::from);
-
-        let persons = item["persons"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let entities_list = item["entities"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let topic = item["topic"]
-            .as_str()
-            .filter(|s| *s != "null" && !s.is_empty())
-            .map(String::from);
-
-        entries.push(MemoryEntry {
-            id: Uuid::new_v4(),
-            restatement,
-            keywords,
-            timestamp,
-            location,
-            persons,
-            entities: entities_list,
-            topic,
-            user_id: None,
-            session_id: None,
-        });
-    }
-
-    Ok(entries)
+    let response: ExtractionResponse = llm.chat_structured(&messages, &opts).await?;
+    Ok(response
+        .entries
+        .into_iter()
+        .filter_map(crate::llm::ExtractedEntry::into_memory_entry)
+        .collect())
 }

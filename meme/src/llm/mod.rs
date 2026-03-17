@@ -2,5 +2,7 @@
 
 pub mod client;
 pub mod prompt;
+pub mod schema;
 
-pub use client::{ChatOptions, LlmClient, Message, Role, extract_json_from_text};
+pub use client::{ChatOptions, LlmClient, Message, Role};
+pub use schema::*;
