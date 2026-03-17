@@ -8,7 +8,6 @@ use super::collector::EventCollector;
 use super::consolidation::{ConsolidationPolicy, ConsolidationStats, ConsolidationWorker};
 use super::extractor::ObservationExtractor;
 use super::injector::ContextInjector;
-use super::session::SessionManager;
 use crate::config::{Config, CrossConfig};
 use crate::embedding::Embedder;
 use crate::error::Result;
@@ -123,13 +122,23 @@ impl CrossOrchestrator {
         content_session_id: &str,
         user_prompt: Option<&str>,
     ) -> Result<StartSessionResult> {
-        let mgr = SessionManager::new(&self.db);
-        let session = mgr.start(
-            content_session_id,
-            &self.project,
-            user_prompt,
-            &self.tenant_id,
-        )?;
+        let session = Session {
+            row_id: None,
+            tenant_id: self.tenant_id.clone(),
+            content_session_id: content_session_id.to_owned(),
+            memory_session_id: Uuid::new_v4(),
+            project: self.project.clone(),
+            user_prompt: user_prompt.map(String::from),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: crate::model::SessionStatus::Active,
+            metadata_json: None,
+        };
+        let row_id = self.db.insert_session(&session)?;
+        let session = Session {
+            row_id: Some(row_id),
+            ..session
+        };
 
         let injector = ContextInjector::new(&self.db, self.cross_cfg.max_context_tokens);
         let context = injector
@@ -188,8 +197,11 @@ impl CrossOrchestrator {
     ///
     /// Returns an error if finalization fails.
     pub fn stop_session(&self, memory_session_id: &Uuid) -> Result<FinalizationReport> {
-        let mgr = SessionManager::new(&self.db);
-        mgr.stop(memory_session_id)?;
+        self.db.update_session_status(
+            memory_session_id,
+            crate::model::SessionStatus::Completed,
+            Some(chrono::Utc::now()),
+        )?;
 
         let events = self.db.get_events(memory_session_id)?;
         let event_count = events.len();
@@ -241,16 +253,6 @@ impl CrossOrchestrator {
         );
 
         Ok(report)
-    }
-
-    /// End a session (final cleanup after stop).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the session cannot be found.
-    pub fn end_session(&self, memory_session_id: &Uuid) -> Result<()> {
-        tracing::info!(session_id = %memory_session_id, "session ended");
-        Ok(())
     }
 
     /// Trigger memory consolidation: decay old entries, merge near-duplicates,
@@ -321,7 +323,6 @@ impl CrossOrchestrator {
     ///
     /// Returns an error if the query fails.
     pub fn list_sessions(&self, limit: usize) -> Result<Vec<Session>> {
-        let mgr = SessionManager::new(&self.db);
-        mgr.list(&self.project, limit)
+        self.db.list_sessions(&self.project, limit)
     }
 }

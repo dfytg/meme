@@ -8,7 +8,6 @@ mod consolidation;
 mod extractor;
 mod injector;
 mod orchestrator;
-mod session;
 
 pub use collector::{EventCollector, RedactionFilter};
 pub use consolidation::{
@@ -17,4 +16,3 @@ pub use consolidation::{
 pub use extractor::ObservationExtractor;
 pub use injector::{ContextInjector, render_for_system_prompt};
 pub use orchestrator::CrossOrchestrator;
-pub use session::SessionManager;
