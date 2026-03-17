@@ -275,24 +275,7 @@ impl MemeBuilder {
             }
             #[cfg(feature = "onnx")]
             config::EmbeddingProviderKind::Onnx => {
-                let model_path = config.embedding.onnx_model_path.as_deref().ok_or_else(|| {
-                    error::Error::Config("onnx_model_path is required for ONNX provider".into())
-                })?;
-                let tokenizer_path =
-                    config
-                        .embedding
-                        .onnx_tokenizer_path
-                        .as_deref()
-                        .ok_or_else(|| {
-                            error::Error::Config(
-                                "onnx_tokenizer_path is required for ONNX provider".into(),
-                            )
-                        })?;
-                Embedder::Onnx(embedding::OnnxEmbedding::from_paths(
-                    model_path,
-                    tokenizer_path,
-                    config.embedding.dimension,
-                )?)
+                Embedder::Onnx(embedding::OnnxEmbedding::new(&config.embedding.model)?)
             }
             #[cfg(not(feature = "onnx"))]
             config::EmbeddingProviderKind::Onnx => {

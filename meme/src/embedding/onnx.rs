@@ -1,20 +1,18 @@
-//! Local ONNX Runtime embedding provider.
+//! Local ONNX embedding via [`fastembed`].
 //!
-//! Requires the `onnx` feature flag to be enabled.
-//! Built against `ort 2.0.0-rc.12` API.
+//! Requires the `onnx` feature flag. Models are downloaded automatically
+//! from Hugging Face Hub on first use.
 
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::error::{Error, Result};
 
-/// Embedding provider that runs a local ONNX model via `ort`.
+/// Local embedding provider powered by [`fastembed`].
 ///
-/// Session is wrapped in `Arc<Mutex<_>>` because `Session::run` requires
-/// `&mut self`. Tokenizer is in `Arc` for cheap cloning into blocking tasks.
+/// Handles model download, tokenization, ONNX inference, pooling, and
+/// L2 normalization automatically.
 pub struct OnnxEmbedding {
-    session: Arc<Mutex<ort::session::Session>>,
-    tokenizer: Arc<tokenizers::Tokenizer>,
+    model: Arc<fastembed::TextEmbedding>,
     dimension: usize,
 }
 
@@ -27,31 +25,29 @@ impl std::fmt::Debug for OnnxEmbedding {
 }
 
 impl OnnxEmbedding {
-    /// Load an ONNX model and tokenizer from disk.
+    /// Create a new local embedding provider.
+    ///
+    /// `model_name` must match a fastembed model code
+    /// (e.g. `"BAAI/bge-small-en-v1.5"`).
+    /// The model is downloaded automatically on first use.
     ///
     /// # Errors
     ///
-    /// Returns an error if the model or tokenizer files cannot be loaded.
-    pub fn from_paths(
-        model_path: impl AsRef<Path>,
-        tokenizer_path: impl AsRef<Path>,
-        dimension: usize,
-    ) -> Result<Self> {
-        let session = ort::session::Session::builder()
-            .and_then(|mut b| b.commit_from_file(model_path.as_ref()))
-            .map_err(|e| Error::Embedding(format!("failed to load ONNX model: {e}")))?;
-
-        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path.as_ref())
-            .map_err(|e| Error::Embedding(format!("failed to load tokenizer: {e}")))?;
+    /// Returns an error if the model name is unknown or initialization fails.
+    pub fn new(model_name: &str) -> Result<Self> {
+        let (embedding_model, dimension) = resolve_model(model_name)?;
+        let model = fastembed::TextEmbedding::try_new(
+            fastembed::InitOptions::new(embedding_model).with_show_download_progress(true),
+        )
+        .map_err(|e| Error::Embedding(format!("fastembed init failed: {e}")))?;
 
         Ok(Self {
-            session: Arc::new(Mutex::new(session)),
-            tokenizer: Arc::new(tokenizer),
+            model: Arc::new(model),
             dimension,
         })
     }
 
-    /// Returns the dimensionality of the embedding vectors.
+    /// Returns the embedding dimension.
     #[must_use]
     pub const fn dimension(&self) -> usize {
         self.dimension
@@ -67,12 +63,11 @@ impl OnnxEmbedding {
             return Ok(Vec::new());
         }
         let owned: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
-        let session = Arc::clone(&self.session);
-        let tokenizer = Arc::clone(&self.tokenizer);
-        let dimension = self.dimension;
+        let model = Arc::clone(&self.model);
         tokio::task::spawn_blocking(move || {
-            let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
-            encode_batch_sync(&session, &tokenizer, &refs, dimension)
+            model
+                .embed(owned, None)
+                .map_err(|e| Error::Embedding(format!("fastembed encode failed: {e}")))
         })
         .await
         .map_err(|e| Error::Embedding(format!("spawn_blocking failed: {e}")))?
@@ -88,79 +83,15 @@ impl OnnxEmbedding {
         results
             .into_iter()
             .next()
-            .ok_or_else(|| Error::Embedding("empty result from ONNX query encoding".to_owned()))
+            .ok_or_else(|| Error::Embedding("empty fastembed result".to_owned()))
     }
 }
 
-fn encode_batch_sync(
-    session: &Mutex<ort::session::Session>,
-    tokenizer: &tokenizers::Tokenizer,
-    texts: &[&str],
-    dimension: usize,
-) -> Result<Vec<Vec<f32>>> {
-    let encodings = tokenizer
-        .encode_batch(texts.to_vec(), true)
-        .map_err(|e| Error::Embedding(format!("tokenization failed: {e}")))?;
-
-    let max_len = encodings
-        .iter()
-        .map(|e| e.get_ids().len())
-        .max()
-        .unwrap_or(0);
-
-    let batch_size = texts.len();
-    let mut input_ids = vec![0i64; batch_size * max_len];
-    let mut attention_mask = vec![0i64; batch_size * max_len];
-
-    for (i, encoding) in encodings.iter().enumerate() {
-        let ids = encoding.get_ids();
-        let mask = encoding.get_attention_mask();
-        for (j, (&id, &m)) in ids.iter().zip(mask.iter()).enumerate() {
-            input_ids[i * max_len + j] = i64::from(id);
-            attention_mask[i * max_len + j] = i64::from(m);
+fn resolve_model(name: &str) -> Result<(fastembed::EmbeddingModel, usize)> {
+    for info in fastembed::TextEmbedding::list_supported_models() {
+        if info.model_code == name {
+            return Ok((info.model, info.dim));
         }
     }
-
-    let input_ids_array = ndarray::Array2::from_shape_vec((batch_size, max_len), input_ids)
-        .map_err(|e| Error::Embedding(format!("shape error: {e}")))?;
-    let attention_mask_array =
-        ndarray::Array2::from_shape_vec((batch_size, max_len), attention_mask)
-            .map_err(|e| Error::Embedding(format!("shape error: {e}")))?;
-
-    let ids_tensor = ort::value::TensorRef::from_array_view(&input_ids_array)
-        .map_err(|e| Error::Embedding(format!("tensor creation failed: {e}")))?;
-    let mask_tensor = ort::value::TensorRef::from_array_view(&attention_mask_array)
-        .map_err(|e| Error::Embedding(format!("tensor creation failed: {e}")))?;
-
-    let mut sess = session
-        .lock()
-        .map_err(|e| Error::Embedding(format!("session lock poisoned: {e}")))?;
-
-    let outputs = sess
-        .run(ort::inputs![ids_tensor, mask_tensor])
-        .map_err(|e| Error::Embedding(format!("ONNX inference failed: {e}")))?;
-
-    let (_shape, flat_data) = outputs[0]
-        .try_extract_tensor::<f32>()
-        .map_err(|e| Error::Embedding(format!("output extraction failed: {e}")))?;
-
-    let mut results = Vec::with_capacity(batch_size);
-    for i in 0..batch_size {
-        let start = i * dimension;
-        let end = start + dimension;
-        let embedding = if end <= flat_data.len() {
-            flat_data[start..end].to_vec()
-        } else {
-            vec![0.0f32; dimension]
-        };
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let normalized = if norm > 0.0 {
-            embedding.iter().map(|x| x / norm).collect()
-        } else {
-            embedding
-        };
-        results.push(normalized);
-    }
-
-    Ok(results)
+    Err(Error::Config(format!("unknown fastembed model: {name}")))
 }

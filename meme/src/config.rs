@@ -139,14 +139,11 @@ impl std::str::FromStr for EmbeddingProviderKind {
 pub struct EmbeddingConfig {
     /// Which provider to use.
     pub provider: EmbeddingProviderKind,
-    /// Model name (for API) or model identifier.
+    /// Model name — API model name (e.g. `"text-embedding-3-small"`) or
+    /// fastembed model code (e.g. `"BAAI/bge-small-en-v1.5"`).
     pub model: String,
-    /// Embedding dimension.
+    /// Embedding dimension (used by API provider; auto-detected for ONNX).
     pub dimension: usize,
-    /// Path to ONNX model file (when provider = onnx).
-    pub onnx_model_path: Option<String>,
-    /// Path to tokenizer file (when provider = onnx).
-    pub onnx_tokenizer_path: Option<String>,
 }
 
 impl Default for EmbeddingConfig {
@@ -155,8 +152,6 @@ impl Default for EmbeddingConfig {
             provider: EmbeddingProviderKind::Api,
             model: "text-embedding-3-small".to_owned(),
             dimension: 1024,
-            onnx_model_path: None,
-            onnx_tokenizer_path: None,
         }
     }
 }

@@ -105,7 +105,7 @@ impl VectorStore {
             .map_err(|e| Error::VectorStore(format!("open table failed: {e}")))
     }
 
-    fn batch_to_entries(&self, batch: &RecordBatch) -> Vec<MemoryEntry> {
+    fn batch_to_entries(batch: &RecordBatch) -> Vec<MemoryEntry> {
         let n = batch.num_rows();
         let mut entries = Vec::with_capacity(n);
 
@@ -334,7 +334,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.batch_to_entries(b))
+            .flat_map(|b| Self::batch_to_entries(b))
             .collect())
     }
 
@@ -381,7 +381,7 @@ impl VectorStore {
                     .map_err(|e| Error::VectorStore(format!("FTS collect failed: {e}")))?;
                 return Ok(batches
                     .iter()
-                    .flat_map(|b| self.batch_to_entries(b))
+                    .flat_map(|b| Self::batch_to_entries(b))
                     .collect());
             }
             Err(e) => {
@@ -414,7 +414,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.batch_to_entries(b))
+            .flat_map(|b| Self::batch_to_entries(b))
             .collect())
     }
 
@@ -497,7 +497,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.batch_to_entries(b))
+            .flat_map(|b| Self::batch_to_entries(b))
             .collect())
     }
 
@@ -521,7 +521,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| self.batch_to_entries(b))
+            .flat_map(|b| Self::batch_to_entries(b))
             .collect())
     }
 
@@ -545,7 +545,7 @@ impl VectorStore {
 
         let mut pairs = Vec::new();
         for batch in &batches {
-            let entries = self.batch_to_entries(batch);
+            let entries = Self::batch_to_entries(batch);
             let vectors = batch_to_vectors(batch, self.dimension);
             for (entry, vec) in entries.into_iter().zip(vectors) {
                 pairs.push((entry, vec));

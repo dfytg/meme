@@ -9,7 +9,7 @@ description.workspace = true
 [features]
 default = ["api-embedding"]
 api-embedding = []
-onnx = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
+onnx = ["dep:fastembed"]
 
 [dependencies]
 tokio.workspace = true
@@ -23,9 +23,7 @@ arrow.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 
-ort = { workspace = true, optional = true }
-tokenizers = { workspace = true, optional = true }
-ndarray = { workspace = true, optional = true }
+fastembed = { workspace = true, optional = true }
 
 toml.workspace = true
 directories.workspace = true
