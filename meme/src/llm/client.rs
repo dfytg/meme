@@ -1,5 +1,7 @@
 //! OpenAI-compatible async LLM client.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 use crate::config::LlmConfig;
@@ -84,19 +86,19 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
-    /// Create a new client from configuration.
+    /// Create a new client from configuration using a shared HTTP client.
     ///
     /// # Errors
     ///
     /// Returns an error if the API key is missing.
-    pub fn from_config(config: &LlmConfig) -> Result<Self> {
+    pub fn new(http: reqwest::Client, config: &LlmConfig) -> Result<Self> {
         let api_key = config
             .api_key
             .clone()
             .ok_or_else(|| Error::Config("LLM API key is required".to_owned()))?;
 
         Ok(Self {
-            http: reqwest::Client::new(),
+            http,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             api_key,
             model: config.model.clone(),
@@ -104,29 +106,14 @@ impl LlmClient {
         })
     }
 
-    /// Create a new client with explicit parameters.
-    #[must_use]
-    pub fn new(
-        api_key: impl Into<String>,
-        model: impl Into<String>,
-        base_url: impl Into<String>,
-    ) -> Self {
-        Self {
-            http: reqwest::Client::new(),
-            base_url: base_url.into().trim_end_matches('/').to_owned(),
-            api_key: api_key.into(),
-            model: model.into(),
-            max_retries: 3,
-        }
-    }
-
     /// Send a chat completion request and return the response text.
     ///
-    /// Retries with exponential backoff on failure.
+    /// Retries with exponential backoff on transient failures.
     ///
     /// # Errors
     ///
     /// Returns an error if the API call fails after retries.
+    #[tracing::instrument(skip(self, messages, opts), fields(model = %self.model))]
     pub async fn chat(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
         let mut last_err = None;
         for attempt in 0..self.max_retries {
@@ -137,7 +124,7 @@ impl LlmClient {
                     last_err = Some(e);
                     if attempt + 1 < self.max_retries {
                         let wait = 1u64 << attempt;
-                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                        tokio::time::sleep(Duration::from_secs(wait)).await;
                     }
                 }
             }
@@ -163,7 +150,6 @@ impl LlmClient {
             .http
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
             .json(&body)
             .send()
             .await?;

@@ -1,8 +1,13 @@
 //! API-based embedding provider — calls an OpenAI-compatible embeddings endpoint.
 
+use std::time::Duration;
+
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
+
+/// Maximum texts per single API call to avoid timeouts on large batches.
+const EMBED_BATCH_SIZE: usize = 128;
 
 /// Embedding provider that calls a remote OpenAI-compatible API.
 #[derive(Debug, Clone)]
@@ -16,30 +21,13 @@ pub struct ApiEmbedding {
 }
 
 impl ApiEmbedding {
-    /// Create a new API embedding provider.
-    #[must_use]
-    pub fn new(
-        api_key: impl Into<String>,
-        model: impl Into<String>,
-        base_url: impl Into<String>,
-        dimension: usize,
-    ) -> Self {
-        Self {
-            http: reqwest::Client::new(),
-            base_url: base_url.into().trim_end_matches('/').to_owned(),
-            api_key: api_key.into(),
-            model: model.into(),
-            dimension,
-            max_retries: 3,
-        }
-    }
-
-    /// Create from the embedding config section.
+    /// Create a new API embedding provider using a shared HTTP client.
     ///
     /// # Errors
     ///
-    /// Returns an error if the LLM API key is missing.
-    pub fn from_config(
+    /// Returns an error if the API key is missing.
+    pub fn new(
+        http: reqwest::Client,
         embedding_cfg: &crate::config::EmbeddingConfig,
         llm_cfg: &crate::config::LlmConfig,
     ) -> Result<Self> {
@@ -47,12 +35,14 @@ impl ApiEmbedding {
             .api_key
             .clone()
             .ok_or_else(|| Error::Config("API key is required for API embedding".to_owned()))?;
-        Ok(Self::new(
+        Ok(Self {
+            http,
+            base_url: llm_cfg.base_url.trim_end_matches('/').to_owned(),
             api_key,
-            &embedding_cfg.model,
-            &llm_cfg.base_url,
-            embedding_cfg.dimension,
-        ))
+            model: embedding_cfg.model.clone(),
+            dimension: embedding_cfg.dimension,
+            max_retries: llm_cfg.max_retries,
+        })
     }
 
     /// Returns the dimensionality of the embedding vectors.
@@ -63,15 +53,29 @@ impl ApiEmbedding {
 
     /// Encode a batch of document texts into embedding vectors.
     ///
+    /// Large batches are automatically chunked to avoid API timeouts.
+    ///
     /// # Errors
     ///
     /// Returns an error if encoding fails.
+    #[tracing::instrument(skip(self, texts), fields(count = texts.len()))]
     pub async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        let input: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
-        self.embed(input).await
+
+        if texts.len() <= EMBED_BATCH_SIZE {
+            let input: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
+            return self.embed_with_retry(input).await;
+        }
+
+        let mut all_vectors = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(EMBED_BATCH_SIZE) {
+            let input: Vec<String> = chunk.iter().map(|s| (*s).to_owned()).collect();
+            let vectors = self.embed_with_retry(input).await?;
+            all_vectors.extend(vectors);
+        }
+        Ok(all_vectors)
     }
 
     /// Encode a single query text into an embedding vector.
@@ -80,24 +84,24 @@ impl ApiEmbedding {
     ///
     /// Returns an error if encoding fails.
     pub async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
-        let results = self.embed(vec![text.to_owned()]).await?;
+        let results = self.embed_with_retry(vec![text.to_owned()]).await?;
         results
             .into_iter()
             .next()
             .ok_or_else(|| Error::Embedding("empty embedding response for query".to_owned()))
     }
 
-    async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
+    async fn embed_with_retry(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
         let mut last_err = None;
         for attempt in 0..self.max_retries {
-            match self.call_embed_api(&input).await {
+            match self.call_api(&input).await {
                 Ok(vectors) => return Ok(vectors),
                 Err(e) => {
                     tracing::warn!(attempt = attempt + 1, error = %e, "embedding API call failed");
                     last_err = Some(e);
                     if attempt + 1 < self.max_retries {
                         let wait = 1u64 << attempt;
-                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                        tokio::time::sleep(Duration::from_secs(wait)).await;
                     }
                 }
             }
@@ -106,7 +110,7 @@ impl ApiEmbedding {
             .unwrap_or_else(|| Error::Embedding("all embedding retries exhausted".to_owned())))
     }
 
-    async fn call_embed_api(&self, input: &[String]) -> Result<Vec<Vec<f32>>> {
+    async fn call_api(&self, input: &[String]) -> Result<Vec<Vec<f32>>> {
         let url = format!("{}/embeddings", self.base_url);
 
         let body = serde_json::json!({
@@ -119,7 +123,6 @@ impl ApiEmbedding {
             .http
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
             .json(&body)
             .send()
             .await?;

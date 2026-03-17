@@ -68,6 +68,7 @@ impl MemoryBuilder {
     /// # Errors
     ///
     /// Returns an error if LLM extraction fails.
+    #[tracing::instrument(skip(self, dialogue))]
     pub async fn add_dialogue(&mut self, dialogue: Dialogue) -> Result<Vec<MemoryEntry>> {
         self.dialogue_buffer.push(dialogue);
         if self.dialogue_buffer.len() >= self.window_size {
@@ -83,6 +84,7 @@ impl MemoryBuilder {
     /// # Errors
     ///
     /// Returns an error if LLM extraction fails.
+    #[tracing::instrument(skip(self, dialogues), fields(count = dialogues.len()))]
     pub async fn add_dialogues(&mut self, dialogues: Vec<Dialogue>) -> Result<Vec<MemoryEntry>> {
         if dialogues.len() > self.window_size * 2 {
             return self.add_dialogues_parallel(dialogues).await;
@@ -102,6 +104,7 @@ impl MemoryBuilder {
     /// # Errors
     ///
     /// Returns an error if LLM extraction fails.
+    #[tracing::instrument(skip(self), fields(remaining = self.dialogue_buffer.len()))]
     pub async fn finalize(&mut self) -> Result<Vec<MemoryEntry>> {
         if self.dialogue_buffer.is_empty() {
             return Ok(Vec::new());

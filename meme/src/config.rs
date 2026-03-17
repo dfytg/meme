@@ -66,6 +66,30 @@ impl Config {
         Ok(())
     }
 
+    /// Validate configuration for common mistakes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any configuration value is invalid.
+    pub fn validate(&self) -> Result<()> {
+        if self.pipeline.overlap_size >= self.pipeline.window_size {
+            return Err(Error::Config(format!(
+                "overlap_size ({}) must be less than window_size ({})",
+                self.pipeline.overlap_size, self.pipeline.window_size
+            )));
+        }
+        if self.pipeline.window_size == 0 {
+            return Err(Error::Config("window_size must be > 0".into()));
+        }
+        if self.embedding.dimension == 0 {
+            return Err(Error::Config("embedding dimension must be > 0".into()));
+        }
+        if self.llm.max_retries == 0 {
+            return Err(Error::Config("max_retries must be > 0".into()));
+        }
+        Ok(())
+    }
+
     fn apply_env_overrides(&mut self) {
         if let Ok(v) = std::env::var("MEME_LLM_API_KEY") {
             self.llm.api_key = Some(v);
@@ -286,5 +310,38 @@ mod tests {
         let step = c.window_size.saturating_sub(c.overlap_size).max(1);
         assert!(step > 0);
         assert!(step <= c.window_size);
+    }
+
+    #[test]
+    fn validate_default_ok() {
+        Config::default().validate().unwrap();
+    }
+
+    #[test]
+    fn validate_overlap_ge_window() {
+        let mut c = Config::default();
+        c.pipeline.overlap_size = c.pipeline.window_size;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_zero_window() {
+        let mut c = Config::default();
+        c.pipeline.window_size = 0;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_zero_dimension() {
+        let mut c = Config::default();
+        c.embedding.dimension = 0;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_zero_retries() {
+        let mut c = Config::default();
+        c.llm.max_retries = 0;
+        assert!(c.validate().is_err());
     }
 }

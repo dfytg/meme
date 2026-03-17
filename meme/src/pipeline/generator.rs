@@ -9,6 +9,7 @@ use crate::model::MemoryEntry;
 /// # Errors
 ///
 /// Returns an error if the LLM call fails.
+#[tracing::instrument(skip(llm, contexts), fields(contexts = contexts.len()))]
 pub async fn generate(llm: &LlmClient, query: &str, contexts: &[MemoryEntry]) -> Result<String> {
     if contexts.is_empty() {
         return Ok("No relevant information found".to_owned());

@@ -36,6 +36,7 @@
 pub mod config;
 pub mod embedding;
 pub mod error;
+pub mod http;
 pub mod llm;
 pub mod model;
 pub mod pipeline;
@@ -45,7 +46,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use config::Config;
-use embedding::{ApiEmbedding, Embedder};
+use embedding::Embedder;
 use error::Result;
 use llm::LlmClient;
 use model::{Dialogue, MemoryEntry};
@@ -91,6 +92,7 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if LLM extraction or storage fails.
+    #[tracing::instrument(skip(self, content, timestamp), fields(speaker))]
     pub async fn add_dialogue(
         &self,
         speaker: &str,
@@ -115,6 +117,7 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if embedding computation or storage fails.
+    #[tracing::instrument(skip(self, entries), fields(count = entries.len()))]
     pub async fn import_entries(&self, entries: &mut [MemoryEntry]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
@@ -166,11 +169,11 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if retrieval or answer generation fails.
+    #[tracing::instrument(skip(self))]
     pub async fn ask(&self, question: &str) -> Result<String> {
-        tracing::info!(question, "processing question");
         let contexts = self.retriever.retrieve(question).await?;
         let answer = pipeline::generator::generate(&self.llm, question, &contexts).await?;
-        tracing::info!(question, answer = answer.as_str(), "answer generated");
+        tracing::info!(contexts = contexts.len(), "answer generated");
         Ok(answer)
     }
 
@@ -424,13 +427,18 @@ impl MemeBuilder {
             config.llm.base_url = url;
         }
 
-        // Build components.
-        let llm = Arc::new(LlmClient::from_config(&config.llm)?);
+        config.validate()?;
+
+        let http = http::build_http_client()?;
+
+        let llm = Arc::new(LlmClient::new(http.clone(), &config.llm)?);
 
         let embedder = Arc::new(match config.embedding.provider {
-            config::EmbeddingProviderKind::Api => {
-                Embedder::Api(ApiEmbedding::from_config(&config.embedding, &config.llm)?)
-            }
+            config::EmbeddingProviderKind::Api => Embedder::Api(embedding::ApiEmbedding::new(
+                http,
+                &config.embedding,
+                &config.llm,
+            )?),
             #[cfg(feature = "onnx")]
             config::EmbeddingProviderKind::Onnx => {
                 Embedder::Onnx(embedding::OnnxEmbedding::new(&config.embedding.model)?)

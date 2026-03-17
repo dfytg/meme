@@ -70,6 +70,7 @@ impl HybridRetriever {
     /// # Errors
     ///
     /// Returns an error if any retrieval step fails.
+    #[tracing::instrument(skip(self))]
     pub async fn retrieve(&self, query: &str) -> Result<Vec<MemoryEntry>> {
         if self.enable_planning {
             self.retrieve_with_planning(query).await
@@ -78,9 +79,8 @@ impl HybridRetriever {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn retrieve_with_planning(&self, query: &str) -> Result<Vec<MemoryEntry>> {
-        tracing::info!(query, "planning retrieval");
-
         // Single LLM call: unified query analysis + search planning.
         let plan = self.plan_query(query).await?;
 
