@@ -91,6 +91,24 @@ let answer = meme.ask("When will Alice meet?").await?;
 
 See [`examples/`](meme/examples/) for more: [basic](meme/examples/basic.rs), [batch import](meme/examples/batch_import.rs).
 
+## Feature Flags
+
+| Feature | Description |
+| --- | --- |
+| `api-embedding` | Remote API-based embedding (enabled by default) |
+| `onnx` | Local ONNX Runtime embedding via `ort` + `tokenizers` |
+
+## Configuration
+
+Configuration is loaded from `~/.meme/config.toml` with environment variable overrides:
+
+| Env Var | Description |
+| --- | --- |
+| `MEME_LLM_API_KEY` | OpenAI-compatible API key |
+| `MEME_LLM_BASE_URL` | API base URL |
+| `MEME_LLM_MODEL` | Model name (default: `gpt-4.1-mini`) |
+| `MEME_EMBEDDING_PROVIDER` | `api` or `onnx` |
+
 ## Architecture
 
 ```text
@@ -134,24 +152,6 @@ A single LLM call analyzes the query to produce a **unified plan** containing:
 - Required information types for completeness assessment
 
 The plan drives parallel execution of three search views (semantic, keyword, structured), followed by optional **reflection** rounds that assess completeness and issue additional targeted queries.
-
-## Feature Flags
-
-| Feature | Description |
-| --- | --- |
-| `api-embedding` | Remote API-based embedding (enabled by default) |
-| `onnx` | Local ONNX Runtime embedding via `ort` + `tokenizers` |
-
-## Configuration
-
-Configuration is loaded from `~/.meme/config.toml` with environment variable overrides:
-
-| Env Var | Description |
-| --- | --- |
-| `MEME_LLM_API_KEY` | OpenAI-compatible API key |
-| `MEME_LLM_BASE_URL` | API base URL |
-| `MEME_LLM_MODEL` | Model name (default: `gpt-4.1-mini`) |
-| `MEME_EMBEDDING_PROVIDER` | `api` or `onnx` |
 
 ## License
 

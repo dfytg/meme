@@ -3,7 +3,7 @@
 //! Requires the `onnx` feature flag. Models are downloaded automatically
 //! from Hugging Face Hub on first use.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::error::{Error, Result};
 
@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 /// Handles model download, tokenization, ONNX inference, pooling, and
 /// L2 normalization automatically.
 pub struct OnnxEmbedding {
-    model: Arc<fastembed::TextEmbedding>,
+    model: Arc<Mutex<fastembed::TextEmbedding>>,
     dimension: usize,
 }
 
@@ -42,7 +42,7 @@ impl OnnxEmbedding {
         .map_err(|e| Error::Embedding(format!("fastembed init failed: {e}")))?;
 
         Ok(Self {
-            model: Arc::new(model),
+            model: Arc::new(Mutex::new(model)),
             dimension,
         })
     }
@@ -65,7 +65,10 @@ impl OnnxEmbedding {
         let owned: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
         let model = Arc::clone(&self.model);
         tokio::task::spawn_blocking(move || {
-            model
+            let mut guard = model
+                .lock()
+                .map_err(|e| Error::Embedding(format!("fastembed lock poisoned: {e}")))?;
+            guard
                 .embed(owned, None)
                 .map_err(|e| Error::Embedding(format!("fastembed encode failed: {e}")))
         })

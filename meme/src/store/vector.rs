@@ -334,7 +334,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| Self::batch_to_entries(b))
+            .flat_map(Self::batch_to_entries)
             .collect())
     }
 
@@ -381,7 +381,7 @@ impl VectorStore {
                     .map_err(|e| Error::VectorStore(format!("FTS collect failed: {e}")))?;
                 return Ok(batches
                     .iter()
-                    .flat_map(|b| Self::batch_to_entries(b))
+                    .flat_map(Self::batch_to_entries)
                     .collect());
             }
             Err(e) => {
@@ -414,7 +414,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| Self::batch_to_entries(b))
+            .flat_map(Self::batch_to_entries)
             .collect())
     }
 
@@ -497,7 +497,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| Self::batch_to_entries(b))
+            .flat_map(Self::batch_to_entries)
             .collect())
     }
 
@@ -521,7 +521,7 @@ impl VectorStore {
 
         Ok(batches
             .iter()
-            .flat_map(|b| Self::batch_to_entries(b))
+            .flat_map(Self::batch_to_entries)
             .collect())
     }
 
