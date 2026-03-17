@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "LOCOMO benchmark runner for meme memory system"
 
+[lib]
+name = "meme_bench"
+path = "src/lib.rs"
+
 [[bin]]
 name = "meme-bench"
 path = "src/main.rs"

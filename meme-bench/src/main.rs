@@ -16,11 +16,8 @@
 
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::future_not_send)]
 
-mod dataset;
-mod metrics;
-mod runner;
-
 use clap::{Parser, Subcommand};
+use meme_bench::{dataset, runner};
 
 #[derive(Debug, Parser)]
 #[command(name = "meme-bench", version, about = "LOCOMO benchmark for meme")]

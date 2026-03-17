@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use crate::dataset::{BenchmarkDataset, Scenario};
+use crate::dataset::Scenario;
 use crate::metrics::{self, AggregateMetrics, QuestionResult};
 
 /// Run command arguments.
@@ -55,8 +55,17 @@ impl RunCmd {
     ///
     /// Returns an error if dataset loading, meme initialization, or evaluation fails.
     pub async fn run(&self) -> anyhow::Result<()> {
-        let content = std::fs::read_to_string(&self.dataset)?;
-        let dataset: BenchmarkDataset = serde_json::from_str(&content)?;
+        let path = std::path::Path::new(&self.dataset);
+        let dataset = match crate::dataset::load_locomo(path) {
+            Ok(ds) => {
+                println!("Loaded LOCOMO-format dataset");
+                ds
+            }
+            Err(_) => {
+                let content = std::fs::read_to_string(path)?;
+                serde_json::from_str(&content)?
+            }
+        };
 
         println!("=== meme LOCOMO Benchmark ===");
         println!(

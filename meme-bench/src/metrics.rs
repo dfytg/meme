@@ -7,34 +7,53 @@ use crate::dataset::QuestionCategory;
 /// Result of evaluating a single question.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct QuestionResult {
+    /// Question identifier.
     pub question_id: String,
+    /// Question category.
     pub category: QuestionCategory,
+    /// Question text.
     pub question: String,
+    /// Expected (ground truth) answer.
     pub expected: String,
+    /// Model-predicted answer.
     pub predicted: String,
+    /// Token-level F1 score.
     pub f1: f64,
+    /// Token-level precision.
     pub precision: f64,
+    /// Token-level recall.
     pub recall: f64,
+    /// Whether the prediction exactly matches the reference.
     pub exact_match: bool,
 }
 
 /// Aggregated results for a scenario or the entire benchmark.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AggregateMetrics {
+    /// Total number of evaluated questions.
     pub total_questions: usize,
+    /// Mean token-level F1 across all questions.
     pub mean_f1: f64,
+    /// Mean token-level precision.
     pub mean_precision: f64,
+    /// Mean token-level recall.
     pub mean_recall: f64,
+    /// Fraction of exact-match predictions.
     pub exact_match_rate: f64,
+    /// Per-category breakdown.
     pub per_category: HashMap<QuestionCategory, CategoryMetrics>,
 }
 
 /// Metrics for a single question category.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct CategoryMetrics {
+    /// Number of questions in this category.
     pub count: usize,
+    /// Mean token-level F1.
     pub mean_f1: f64,
+    /// Mean token-level precision.
     pub mean_precision: f64,
+    /// Mean token-level recall.
     pub mean_recall: f64,
 }
 

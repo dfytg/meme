@@ -81,6 +81,169 @@ pub struct Question {
     pub acceptable_answers: Vec<String>,
 }
 
+/// Raw LOCOMO JSON format (locomo10.json).
+mod raw {
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    pub struct LocomoEntry {
+        pub qa: Vec<RawQuestion>,
+        pub conversation: Conversation,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct RawQuestion {
+        pub question: String,
+        pub answer: Option<serde_json::Value>,
+        #[serde(default)]
+        #[allow(dead_code)]
+        pub evidence: Vec<String>,
+        pub category: u8,
+        #[allow(dead_code)]
+        pub adversarial_answer: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct Conversation {
+        pub speaker_a: String,
+        pub speaker_b: String,
+        #[serde(flatten)]
+        pub sessions: std::collections::BTreeMap<String, serde_json::Value>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct DialogueItem {
+        pub speaker: String,
+        pub text: String,
+        #[serde(default)]
+        #[allow(dead_code)]
+        pub dia_id: Option<String>,
+    }
+}
+
+/// Load a LOCOMO-format dataset (locomo10.json) and convert to [`BenchmarkDataset`].
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or parsed.
+pub fn load_locomo(path: &std::path::Path) -> Result<BenchmarkDataset, String> {
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let entries: Vec<raw::LocomoEntry> =
+        serde_json::from_str(&content).map_err(|e| format!("failed to parse LOCOMO JSON: {e}"))?;
+
+    let mut scenarios = Vec::with_capacity(entries.len());
+    for (idx, entry) in entries.into_iter().enumerate() {
+        let dialogues = extract_dialogues(&entry.conversation);
+        let questions = entry
+            .qa
+            .into_iter()
+            .enumerate()
+            .map(|(qi, q)| convert_question(idx, qi, q))
+            .collect();
+
+        scenarios.push(Scenario {
+            id: format!("locomo_{idx}"),
+            description: format!(
+                "{} & {} conversation",
+                entry.conversation.speaker_a, entry.conversation.speaker_b
+            ),
+            dialogues,
+            questions,
+        });
+    }
+
+    Ok(BenchmarkDataset {
+        name: "LOCOMO".into(),
+        scenarios,
+    })
+}
+
+fn extract_dialogues(conv: &raw::Conversation) -> Vec<DialogueTurn> {
+    let mut dialogues = Vec::new();
+
+    let mut session_keys: Vec<&String> = conv
+        .sessions
+        .keys()
+        .filter(|k| k.starts_with("session_") && !k.ends_with("_date_time"))
+        .collect();
+    session_keys.sort_by(|a, b| {
+        let num_a = a.trim_start_matches("session_").parse::<u32>().unwrap_or(0);
+        let num_b = b.trim_start_matches("session_").parse::<u32>().unwrap_or(0);
+        num_a.cmp(&num_b)
+    });
+
+    for key in session_keys {
+        let date_key = format!("{key}_date_time");
+        let session_ts = conv.sessions.get(&date_key).and_then(|v| v.as_str()).map(String::from);
+
+        let Some(session_val) = conv.sessions.get(key) else {
+            continue;
+        };
+        let Ok(items) = serde_json::from_value::<Vec<raw::DialogueItem>>(session_val.clone())
+        else {
+            continue;
+        };
+
+        for item in items {
+            dialogues.push(DialogueTurn {
+                speaker: item.speaker,
+                content: item.text,
+                timestamp: session_ts.clone(),
+            });
+        }
+    }
+    dialogues
+}
+
+fn map_category(cat: u8) -> QuestionCategory {
+    match cat {
+        1 => QuestionCategory::SingleHop,
+        2 => QuestionCategory::Temporal,
+        3 => QuestionCategory::Commonsense,
+        4 => QuestionCategory::MultiHop,
+        5 => QuestionCategory::Adversarial,
+        _ => QuestionCategory::SingleHop,
+    }
+}
+
+fn convert_question(scenario_idx: usize, q_idx: usize, q: raw::RawQuestion) -> Question {
+    let category = map_category(q.category);
+
+    let answer = if category == QuestionCategory::Adversarial {
+        // Adversarial questions have no ground-truth answer.
+        // The correct response is to indicate the information doesn't apply.
+        "unknown".to_owned()
+    } else {
+        q.answer
+            .map(|v| match v {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            })
+            .unwrap_or_default()
+    };
+
+    let mut acceptable = Vec::new();
+    if category == QuestionCategory::Adversarial {
+        // For adversarial: accepting refusal-style answers
+        acceptable.extend([
+            "I don't know".to_owned(),
+            "not mentioned".to_owned(),
+            "no information".to_owned(),
+            "cannot determine".to_owned(),
+            "not available".to_owned(),
+        ]);
+    }
+
+    Question {
+        id: format!("s{scenario_idx}_q{q_idx}"),
+        question: q.question,
+        answer,
+        category,
+        acceptable_answers: acceptable,
+    }
+}
+
 /// Generate a sample benchmark dataset for testing/demonstration.
 #[must_use]
 pub fn sample_dataset() -> BenchmarkDataset {
