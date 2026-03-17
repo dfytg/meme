@@ -32,10 +32,10 @@ impl Scope {
     fn to_where_clause(&self) -> Option<String> {
         let mut parts = Vec::new();
         if let Some(uid) = &self.user_id {
-            parts.push(format!("user_id = '{}'", escape_like(uid)));
+            parts.push(format!("user_id = '{}'", escape_sql_string(uid)));
         }
         if let Some(sid) = &self.session_id {
-            parts.push(format!("session_id = '{}'", escape_like(sid)));
+            parts.push(format!("session_id = '{}'", escape_sql_string(sid)));
         }
         if parts.is_empty() {
             None
@@ -897,11 +897,18 @@ fn join_delimited(items: &[String]) -> String {
     items.join("||")
 }
 
+/// Escape a string for use in SQL `LIKE` patterns.
 fn escape_like(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('\'', "''")
         .replace('%', "\\%")
         .replace('_', "\\_")
+}
+
+/// Escape a string for use in SQL equality (`=`) comparisons.
+/// Only escapes single quotes to prevent SQL injection.
+fn escape_sql_string(s: &str) -> String {
+    s.replace('\'', "''")
 }
 
 fn is_valid_uuid(s: &str) -> bool {
@@ -1129,5 +1136,27 @@ mod tests {
             session_id: None,
         };
         assert!(!scope_matches(&e, &s));
+    }
+
+    #[test]
+    fn escape_sql_string_quotes() {
+        assert_eq!(escape_sql_string("it's"), "it''s");
+        assert_eq!(escape_sql_string("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_sql_string_preserves_underscores() {
+        assert_eq!(escape_sql_string("user_a"), "user_a");
+        assert_eq!(escape_sql_string("a_b_c"), "a_b_c");
+    }
+
+    #[test]
+    fn scope_with_underscore_no_escape() {
+        let s = Scope {
+            user_id: Some("user_a".into()),
+            session_id: None,
+        };
+        let clause = s.to_where_clause().unwrap();
+        assert_eq!(clause, "user_id = 'user_a'");
     }
 }

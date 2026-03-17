@@ -19,7 +19,7 @@
 
 **High-performance long-term memory for AI agents — three-stage pipeline with semantic compression, hybrid retrieval, and persistent vector storage, written in Rust.**
 
-meme implements the [SimpleMem](3rdparty/SimpleMem/) three-stage memory pipeline with a production-grade Rust core: (1) **Semantic Structured Compression** extracts lossless, disambiguated memory entries from dialogues via LLM, (2) **Online Semantic Synthesis** deduplicates at write time, and (3) **Intent-Aware Retrieval Planning** combines semantic, lexical (FTS), and structured metadata search with LLM-driven reflection. Memory is stored persistently on disk via LanceDB.
+meme implements the [SimpleMem](https://github.com/aiming-lab/SimpleMem) three-stage memory pipeline with a production-grade Rust core: (1) **Semantic Structured Compression** extracts lossless, disambiguated memory entries from dialogues via LLM, (2) **Online Semantic Synthesis** deduplicates at write time, and (3) **Intent-Aware Retrieval Planning** combines semantic, lexical (FTS), and structured metadata search with LLM-driven reflection. Memory is stored persistently on disk via LanceDB.
 
 ## Quick Start
 
