@@ -791,7 +791,7 @@ impl VectorStore {
             }
         }
 
-        // ANN-based near-duplicate detection: query each live entry's neighbors.
+        // ANN-based near-duplicate detection: batch parallel neighbor queries.
         let merge_k = 5;
         let no_scope = Scope::default();
         let mut merged = 0usize;
@@ -801,13 +801,29 @@ impl VectorStore {
         let id_to_idx: std::collections::HashMap<uuid::Uuid, usize> =
             entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
 
-        for i in 0..n {
+        // Parallel ANN queries for all live entries.
+        let live_indices: Vec<usize> = (0..n).filter(|i| !dead.contains(i)).collect();
+        let max_ann_workers = 8;
+        let semaphore = tokio::sync::Semaphore::new(max_ann_workers);
+        let vectors_ref = &vectors;
+        let no_scope_ref = &no_scope;
+        let ann_futures = live_indices.iter().map(|&i| {
+            let sem = &semaphore;
+            async move {
+                let _permit = sem.acquire().await;
+                self.semantic_search(&vectors_ref[i], merge_k, no_scope_ref)
+                    .await
+                    .map(|neighbors| (i, neighbors))
+            }
+        });
+        let all_neighbors: Vec<(usize, Vec<MemoryEntry>)> =
+            futures::future::try_join_all(ann_futures).await?;
+
+        // Process neighbors sequentially (mutates `dead`).
+        for (i, neighbors) in all_neighbors {
             if dead.contains(&i) {
                 continue;
             }
-            let neighbors = self
-                .semantic_search(&vectors[i], merge_k, &no_scope)
-                .await?;
             for neighbor in &neighbors {
                 if neighbor.id == entries[i].id {
                     continue;

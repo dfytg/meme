@@ -100,13 +100,15 @@ impl HybridRetriever {
         tracing::info!(count = search_queries.len(), "targeted queries");
 
         // Execute all three search views in parallel.
-        let mut all_results = self.execute_semantic_searches(&search_queries).await?;
+        let (semantic_results, keyword_results, structured_results) = tokio::join!(
+            self.execute_semantic_searches(&search_queries),
+            self.keyword_search(query, &plan),
+            self.structured_search(&plan),
+        );
 
-        let keyword_results = self.keyword_search(query, &plan).await?;
-        all_results.extend(keyword_results);
-
-        let structured_results = self.structured_search(&plan).await?;
-        all_results.extend(structured_results);
+        let mut all_results = semantic_results?;
+        all_results.extend(keyword_results?);
+        all_results.extend(structured_results?);
 
         let mut merged = deduplicate(all_results);
         tracing::info!(count = merged.len(), "unique results after merge");

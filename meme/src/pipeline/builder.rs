@@ -286,9 +286,17 @@ async fn generate_entries_standalone(
 
 fn parse_entries_response(response: &str) -> Result<Vec<MemoryEntry>> {
     let data = extract_json_from_text(response)?;
-    let arr = data
-        .as_array()
-        .ok_or_else(|| Error::JsonParse("expected JSON array".to_owned()))?;
+
+    // Accept a bare array or an object wrapping one (e.g. {"memories": [...]}).
+    let arr = if let Some(a) = data.as_array() {
+        a.clone()
+    } else if let Some(obj) = data.as_object() {
+        obj.values()
+            .find_map(|v| v.as_array().cloned())
+            .ok_or_else(|| Error::JsonParse("object contains no array field".to_owned()))?
+    } else {
+        return Err(Error::JsonParse("expected JSON array or object".to_owned()));
+    };
 
     let mut entries = Vec::with_capacity(arr.len());
     for item in arr {

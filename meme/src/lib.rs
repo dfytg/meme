@@ -243,99 +243,127 @@ impl Meme {
 
     /// Check each new entry against existing similar memories and resolve conflicts.
     ///
+    /// Runs conflict checks in parallel (semantic search + LLM judgment per entry).
     /// Returns (entries to insert, their vectors, IDs to delete from store).
     async fn resolve_conflicts(
         &self,
         entries: &[MemoryEntry],
         vectors: &[Vec<f32>],
     ) -> Result<(Vec<MemoryEntry>, Vec<Vec<f32>>, Vec<String>)> {
-        let mut accepted = Vec::new();
-        let mut accepted_vecs = Vec::new();
-        let mut ids_to_delete = Vec::new();
-
         let existing_count = self.store.count(&self.scope).await?;
         if existing_count == 0 {
             return Ok((entries.to_vec(), vectors.to_vec(), Vec::new()));
         }
 
         let similarity_top_k = 3;
+        let max_workers = 4;
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
+
+        #[allow(clippy::type_complexity)]
+        let mut handles: Vec<
+            tokio::task::JoinHandle<Result<(Option<MemoryEntry>, Option<Vec<f32>>, Vec<String>)>>,
+        > = Vec::with_capacity(entries.len());
         for (i, entry) in entries.iter().enumerate() {
-            let similar = self
-                .store
-                .semantic_search(&vectors[i], similarity_top_k, &self.scope)
-                .await?;
+            let store = Arc::clone(&self.store);
+            let llm = Arc::clone(&self.llm);
+            let sem = Arc::clone(&semaphore);
+            let scope = self.scope.clone();
+            let vec_i = vectors[i].clone();
+            let entry_clone = entry.clone();
+            handles.push(tokio::spawn(async move {
+                let _permit = sem.acquire().await;
+                let similar = store
+                    .semantic_search(&vec_i, similarity_top_k, &scope)
+                    .await?;
 
-            if similar.is_empty() {
-                accepted.push(entry.clone());
-                accepted_vecs.push(vectors[i].clone());
-                continue;
-            }
+                if similar.is_empty() {
+                    return Ok((Some(entry_clone), Some(vec_i), Vec::new()));
+                }
 
-            let existing_pairs: Vec<(usize, &str)> = similar
-                .iter()
-                .enumerate()
-                .map(|(j, e)| (j, e.restatement.as_str()))
-                .collect();
+                let existing_pairs: Vec<(usize, String)> = similar
+                    .iter()
+                    .enumerate()
+                    .map(|(j, e)| (j, e.restatement.clone()))
+                    .collect();
 
-            match self
-                .resolve_single_conflict(&entry.restatement, &existing_pairs)
-                .await
-            {
-                Ok(actions) => {
-                    let mut is_duplicate = false;
-                    for action in &actions {
-                        let act = action["action"].as_str().unwrap_or("keep_both");
-                        let idx = action["existing_index"].as_u64().unwrap_or(u64::MAX) as usize;
-                        match act {
-                            "duplicate" => {
-                                is_duplicate = true;
-                                tracing::info!(
-                                    new = entry.restatement.as_str(),
-                                    "skipping duplicate memory"
-                                );
+                let refs: Vec<(usize, &str)> = existing_pairs
+                    .iter()
+                    .map(|(j, s)| (*j, s.as_str()))
+                    .collect();
+
+                match resolve_single_conflict_static(&llm, &entry_clone.restatement, &refs).await {
+                    Ok(actions) => {
+                        let mut is_duplicate = false;
+                        let mut to_delete = Vec::new();
+                        for action in &actions {
+                            let act = action["action"].as_str().unwrap_or("keep_both");
+                            let idx =
+                                action["existing_index"].as_u64().unwrap_or(u64::MAX) as usize;
+                            match act {
+                                "duplicate" => {
+                                    is_duplicate = true;
+                                    tracing::info!(
+                                        new = entry_clone.restatement.as_str(),
+                                        "skipping duplicate memory"
+                                    );
+                                }
+                                "update" if idx < similar.len() => {
+                                    to_delete.push(similar[idx].id.to_string());
+                                }
+                                _ => {}
                             }
-                            "update" if idx < similar.len() => {
-                                ids_to_delete.push(similar[idx].id.to_string());
-                            }
-                            _ => {}
+                        }
+                        if is_duplicate {
+                            Ok((None, None, to_delete))
+                        } else {
+                            Ok((Some(entry_clone), Some(vec_i), to_delete))
                         }
                     }
-                    if !is_duplicate {
-                        accepted.push(entry.clone());
-                        accepted_vecs.push(vectors[i].clone());
+                    Err(e) => {
+                        tracing::warn!(error = %e, "conflict resolution failed, keeping entry");
+                        Ok((Some(entry_clone), Some(vec_i), Vec::new()))
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "conflict resolution failed, keeping entry");
-                    accepted.push(entry.clone());
-                    accepted_vecs.push(vectors[i].clone());
-                }
+            }));
+        }
+
+        let mut accepted = Vec::new();
+        let mut accepted_vecs = Vec::new();
+        let mut ids_to_delete = Vec::new();
+        for handle in handles {
+            let (entry_opt, vec_opt, deletes) = handle
+                .await
+                .map_err(|e| error::Error::Internal(format!("conflict task panicked: {e}")))??;
+            if let (Some(entry), Some(vec)) = (entry_opt, vec_opt) {
+                accepted.push(entry);
+                accepted_vecs.push(vec);
             }
+            ids_to_delete.extend(deletes);
         }
 
         Ok((accepted, accepted_vecs, ids_to_delete))
     }
+}
 
-    async fn resolve_single_conflict(
-        &self,
-        new_text: &str,
-        existing: &[(usize, &str)],
-    ) -> Result<Vec<serde_json::Value>> {
-        let prompt_text = llm::prompt::conflict_resolution(new_text, existing);
-        let messages = vec![
-            llm::Message::system(
-                "You are a memory conflict resolution assistant. You must output valid JSON format.",
-            ),
-            llm::Message::user(prompt_text),
-        ];
-        let opts = llm::ChatOptions {
-            temperature: 0.1,
-            json_mode: true,
-        };
-        let response = self.llm.chat(&messages, &opts).await?;
-        let data = llm::extract_json_from_text(&response)?;
-        Ok(data.as_array().cloned().unwrap_or_default())
-    }
+async fn resolve_single_conflict_static(
+    llm: &LlmClient,
+    new_text: &str,
+    existing: &[(usize, &str)],
+) -> Result<Vec<serde_json::Value>> {
+    let prompt_text = llm::prompt::conflict_resolution(new_text, existing);
+    let messages = vec![
+        llm::Message::system(
+            "You are a memory conflict resolution assistant. You must output valid JSON format.",
+        ),
+        llm::Message::user(prompt_text),
+    ];
+    let opts = llm::ChatOptions {
+        temperature: 0.1,
+        json_mode: true,
+    };
+    let response = llm.chat(&messages, &opts).await?;
+    let data = llm::extract_json_from_text(&response)?;
+    Ok(data.as_array().cloned().unwrap_or_default())
 }
 
 /// Builder for constructing a [`Meme`] instance.

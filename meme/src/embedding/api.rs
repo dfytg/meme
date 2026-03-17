@@ -69,10 +69,29 @@ impl ApiEmbedding {
             return self.embed_with_retry(input).await;
         }
 
+        // Parallel chunk embedding with concurrency limit.
+        let chunks: Vec<Vec<String>> = texts
+            .chunks(EMBED_BATCH_SIZE)
+            .map(|chunk| chunk.iter().map(|s| (*s).to_owned()).collect())
+            .collect();
+
+        let max_concurrent = 4;
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+        let mut handles = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            let this = self.clone();
+            let sem = std::sync::Arc::clone(&semaphore);
+            handles.push(tokio::spawn(async move {
+                let _permit = sem.acquire().await;
+                this.embed_with_retry(chunk).await
+            }));
+        }
+
         let mut all_vectors = Vec::with_capacity(texts.len());
-        for chunk in texts.chunks(EMBED_BATCH_SIZE) {
-            let input: Vec<String> = chunk.iter().map(|s| (*s).to_owned()).collect();
-            let vectors = self.embed_with_retry(input).await?;
+        for handle in handles {
+            let vectors = handle
+                .await
+                .map_err(|e| Error::Embedding(format!("embed task panicked: {e}")))??;
             all_vectors.extend(vectors);
         }
         Ok(all_vectors)

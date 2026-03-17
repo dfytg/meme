@@ -23,6 +23,14 @@ pub struct RunCmd {
     /// Only run scenarios matching this ID prefix.
     #[arg(long)]
     pub filter: Option<String>,
+
+    /// Maximum number of scenarios to run.
+    #[arg(short, long)]
+    pub limit: Option<usize>,
+
+    /// Maximum number of questions per scenario.
+    #[arg(long)]
+    pub questions_limit: Option<usize>,
 }
 
 /// Full benchmark report.
@@ -73,7 +81,7 @@ impl RunCmd {
         println!("Model: {}", self.model);
         println!();
 
-        let scenarios: Vec<&Scenario> = if let Some(filter) = &self.filter {
+        let mut scenarios: Vec<&Scenario> = if let Some(filter) = &self.filter {
             dataset
                 .scenarios
                 .iter()
@@ -82,6 +90,10 @@ impl RunCmd {
         } else {
             dataset.scenarios.iter().collect()
         };
+
+        if let Some(limit) = self.limit {
+            scenarios.truncate(limit);
+        }
 
         let t0 = Instant::now();
         let mut all_results: Vec<QuestionResult> = Vec::new();
@@ -208,7 +220,11 @@ impl RunCmd {
         println!("  Stored {stored} memory entries");
 
         let mut results = Vec::new();
-        for q in &scenario.questions {
+        let questions: Vec<_> = self.questions_limit.map_or_else(
+            || scenario.questions.iter().collect(),
+            |ql| scenario.questions.iter().take(ql).collect(),
+        );
+        for q in questions {
             let predicted = meme
                 .ask(&q.question)
                 .await
