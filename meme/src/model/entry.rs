@@ -71,3 +71,82 @@ impl MetadataFilter {
             && self.timestamp_range.is_none()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_entry_new_has_uuid() {
+        let e = MemoryEntry::new("test fact");
+        assert_eq!(e.restatement, "test fact");
+        assert!(!e.id.is_nil());
+        assert!(e.keywords.is_empty());
+        assert!(e.timestamp.is_none());
+        assert!(e.location.is_none());
+        assert!(e.persons.is_empty());
+        assert!(e.entities.is_empty());
+        assert!(e.topic.is_none());
+    }
+
+    #[test]
+    fn memory_entry_unique_ids() {
+        let e1 = MemoryEntry::new("a");
+        let e2 = MemoryEntry::new("b");
+        assert_ne!(e1.id, e2.id);
+    }
+
+    #[test]
+    fn metadata_filter_empty_default() {
+        let f = MetadataFilter::default();
+        assert!(f.is_empty());
+    }
+
+    #[test]
+    fn metadata_filter_not_empty_with_persons() {
+        let f = MetadataFilter {
+            persons: Some(vec!["Alice".into()]),
+            ..Default::default()
+        };
+        assert!(!f.is_empty());
+    }
+
+    #[test]
+    fn metadata_filter_not_empty_with_location() {
+        let f = MetadataFilter {
+            location: Some("Tokyo".into()),
+            ..Default::default()
+        };
+        assert!(!f.is_empty());
+    }
+
+    #[test]
+    fn metadata_filter_not_empty_with_entities() {
+        let f = MetadataFilter {
+            entities: Some(vec!["OpenAI".into()]),
+            ..Default::default()
+        };
+        assert!(!f.is_empty());
+    }
+
+    #[test]
+    fn metadata_filter_not_empty_with_timestamp() {
+        let now = chrono::Utc::now();
+        let f = MetadataFilter {
+            timestamp_range: Some((now, now)),
+            ..Default::default()
+        };
+        assert!(!f.is_empty());
+    }
+
+    #[test]
+    fn memory_entry_serde_roundtrip() {
+        let mut e = MemoryEntry::new("Alice met Bob at 2pm");
+        e.keywords = vec!["meeting".into(), "Alice".into()];
+        e.persons = vec!["Alice".into(), "Bob".into()];
+        e.topic = Some("schedule".into());
+        let json = serde_json::to_string(&e).unwrap();
+        let e2: MemoryEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(e, e2);
+    }
+}

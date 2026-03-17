@@ -230,3 +230,61 @@ fn default_data_dir() -> PathBuf {
 pub fn default_config_path() -> PathBuf {
     default_data_dir().join("config.toml")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_default_values() {
+        let c = Config::default();
+        assert!(c.llm.api_key.is_none());
+        assert_eq!(c.llm.model, "gpt-4.1-mini");
+        assert_eq!(c.llm.max_retries, 3);
+        assert!((c.llm.temperature - 0.1).abs() < f32::EPSILON);
+        assert_eq!(c.embedding.provider, EmbeddingProviderKind::Api);
+        assert_eq!(c.embedding.dimension, 1024);
+        assert_eq!(c.pipeline.window_size, 40);
+        assert!(c.pipeline.enable_planning);
+        assert!(c.pipeline.enable_reflection);
+    }
+
+    #[test]
+    fn config_toml_roundtrip() {
+        let c = Config::default();
+        let toml_str = toml::to_string_pretty(&c).unwrap();
+        let c2: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(c2.llm.model, c.llm.model);
+        assert_eq!(c2.embedding.dimension, c.embedding.dimension);
+        assert_eq!(c2.pipeline.window_size, c.pipeline.window_size);
+    }
+
+    #[test]
+    fn embedding_provider_from_str() {
+        assert_eq!(
+            "api".parse::<EmbeddingProviderKind>().unwrap(),
+            EmbeddingProviderKind::Api
+        );
+        assert_eq!(
+            "API".parse::<EmbeddingProviderKind>().unwrap(),
+            EmbeddingProviderKind::Api
+        );
+        assert_eq!(
+            "onnx".parse::<EmbeddingProviderKind>().unwrap(),
+            EmbeddingProviderKind::Onnx
+        );
+        assert_eq!(
+            "ONNX".parse::<EmbeddingProviderKind>().unwrap(),
+            EmbeddingProviderKind::Onnx
+        );
+        assert!("unknown".parse::<EmbeddingProviderKind>().is_err());
+    }
+
+    #[test]
+    fn pipeline_config_overlap_guard() {
+        let c = PipelineConfig::default();
+        let step = c.window_size.saturating_sub(c.overlap_size).max(1);
+        assert!(step > 0);
+        assert!(step <= c.window_size);
+    }
+}

@@ -749,3 +749,108 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
         dot / (mag_a * mag_b)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_delimited_empty() {
+        assert!(split_delimited("").is_empty());
+    }
+
+    #[test]
+    fn split_delimited_single() {
+        assert_eq!(split_delimited("hello"), vec!["hello"]);
+    }
+
+    #[test]
+    fn split_delimited_multiple() {
+        assert_eq!(split_delimited("a||b||c"), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn split_delimited_trims_whitespace() {
+        assert_eq!(split_delimited(" a || b "), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn split_delimited_skips_empty_segments() {
+        assert_eq!(split_delimited("a||||b"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn join_delimited_roundtrip() {
+        let items = vec!["x".to_owned(), "y".to_owned(), "z".to_owned()];
+        let joined = join_delimited(&items);
+        assert_eq!(joined, "x||y||z");
+        assert_eq!(split_delimited(&joined), vec!["x", "y", "z"]);
+    }
+
+    #[test]
+    fn join_delimited_empty() {
+        let items: Vec<String> = Vec::new();
+        assert_eq!(join_delimited(&items), "");
+    }
+
+    #[test]
+    fn escape_like_special_chars() {
+        assert_eq!(escape_like("it's"), "it''s");
+        assert_eq!(escape_like("100%"), "100\\%");
+        assert_eq!(escape_like("a_b"), "a\\_b");
+    }
+
+    #[test]
+    fn escape_like_clean_string() {
+        assert_eq!(escape_like("hello world"), "hello world");
+    }
+
+    #[test]
+    fn escape_like_combined() {
+        assert_eq!(escape_like("it's 100%_done"), "it''s 100\\%\\_done");
+    }
+
+    #[test]
+    fn cosine_similarity_identical() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!((sim - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal() {
+        let a = vec![1.0, 0.0];
+        let b = vec![0.0, 1.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!(sim.abs() < 1e-9);
+    }
+
+    #[test]
+    fn cosine_similarity_opposite() {
+        let a = vec![1.0, 0.0];
+        let b = vec![-1.0, 0.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!((sim - (-1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cosine_similarity_zero_vector() {
+        let a = vec![0.0, 0.0];
+        let b = vec![1.0, 2.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+        assert_eq!(cosine_similarity(&b, &a), 0.0);
+    }
+
+    #[test]
+    fn cosine_similarity_arbitrary() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![4.0, 5.0, 6.0];
+        let dot = 1.0 * 4.0 + 2.0 * 5.0 + 3.0 * 6.0;
+        let mag_a = (1.0_f64 + 4.0 + 9.0).sqrt();
+        let mag_b = (16.0_f64 + 25.0 + 36.0).sqrt();
+        let expected = dot / (mag_a * mag_b);
+        let sim = cosine_similarity(&a, &b);
+        assert!((sim - expected).abs() < 1e-9);
+    }
+}

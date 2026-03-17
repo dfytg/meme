@@ -333,3 +333,141 @@ fn extract_balanced_json(text: &str, start_char: char) -> Option<serde_json::Val
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_json_empty_input() {
+        assert!(extract_json_from_text("").is_err());
+        assert!(extract_json_from_text("   ").is_err());
+    }
+
+    #[test]
+    fn extract_json_direct_object() {
+        let v = extract_json_from_text(r#"{"key": "value"}"#).unwrap();
+        assert_eq!(v["key"], "value");
+    }
+
+    #[test]
+    fn extract_json_direct_array() {
+        let v = extract_json_from_text(r#"[1, 2, 3]"#).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn extract_json_fenced_block() {
+        let input = "Here is the result:\n```json\n{\"a\": 1}\n```\nDone.";
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v["a"], 1);
+    }
+
+    #[test]
+    fn extract_json_generic_fenced() {
+        let input = "Result:\n```\n{\"b\": 2}\n```";
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v["b"], 2);
+    }
+
+    #[test]
+    fn extract_json_trailing_comma() {
+        let input = r#"```json
+{"items": [1, 2, 3,]}
+```"#;
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v["items"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn extract_json_line_comments() {
+        let input = r#"```json
+{
+  "key": "val" // this is a comment
+}
+```"#;
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v["key"], "val");
+    }
+
+    #[test]
+    fn extract_json_balanced_bracket_in_text() {
+        let input = r#"The answer is {"name": "Alice", "age": 30} and more text."#;
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v["name"], "Alice");
+        assert_eq!(v["age"], 30);
+    }
+
+    #[test]
+    fn extract_json_balanced_array_in_text() {
+        let input = r#"Here: [{"x": 1}, {"x": 2}] done"#;
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn extract_json_with_prefix() {
+        let input = r#"JSON: {"result": true}"#;
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v["result"], true);
+    }
+
+    #[test]
+    fn extract_json_nested_objects() {
+        let input = r#"{"outer": {"inner": [1, 2]}}"#;
+        let v = extract_json_from_text(input).unwrap();
+        assert_eq!(v["outer"]["inner"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn extract_json_no_valid_json() {
+        assert!(extract_json_from_text("just plain text").is_err());
+        assert!(extract_json_from_text("not {valid json").is_err());
+    }
+
+    #[test]
+    fn strip_prefixes_known() {
+        assert_eq!(strip_prefixes("json: {\"a\":1}"), "{\"a\":1}");
+        assert_eq!(strip_prefixes("Result: [1]"), "[1]");
+        assert_eq!(strip_prefixes("Here's the JSON: {}"), "{}");
+    }
+
+    #[test]
+    fn strip_prefixes_none() {
+        assert_eq!(strip_prefixes("{\"a\":1}"), "{\"a\":1}");
+        assert_eq!(
+            strip_prefixes("unknown prefix {\"a\":1}"),
+            "unknown prefix {\"a\":1}"
+        );
+    }
+
+    #[test]
+    fn cleanup_json_trailing_comma_and_comments() {
+        let input = r#"{"a": 1, // comment
+"b": 2,}"#;
+        let cleaned = cleanup_json(input);
+        let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
+        assert_eq!(v["a"], 1);
+        assert_eq!(v["b"], 2);
+    }
+
+    #[test]
+    fn chat_options_default() {
+        let opts = ChatOptions::default();
+        assert!((opts.temperature - 0.1).abs() < f32::EPSILON);
+        assert!(!opts.json_mode);
+    }
+
+    #[test]
+    fn message_constructors() {
+        let sys = Message::system("hello");
+        assert_eq!(sys.role, Role::System);
+        assert_eq!(sys.content, "hello");
+
+        let usr = Message::user("question");
+        assert_eq!(usr.role, Role::User);
+
+        let ast = Message::assistant("answer");
+        assert_eq!(ast.role, Role::Assistant);
+    }
+}

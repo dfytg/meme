@@ -434,3 +434,141 @@ fn parse_time_range(
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::*;
+
+    fn fixed_now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn parse_time_range_yesterday() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("yesterday", now).unwrap();
+        assert_eq!(
+            start.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 6, 14).unwrap()
+        );
+        assert_eq!(
+            end.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 6, 14).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_time_range_today() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("today", now).unwrap();
+        assert_eq!(start.date_naive(), now.date_naive());
+        assert_eq!(end.date_naive(), now.date_naive());
+    }
+
+    #[test]
+    fn parse_time_range_last_week() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("last week", now).unwrap();
+        assert_eq!((end - start).num_days(), 7);
+    }
+
+    #[test]
+    fn parse_time_range_last_month() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("last month", now).unwrap();
+        assert_eq!((end - start).num_days(), 30);
+    }
+
+    #[test]
+    fn parse_time_range_last_n_days() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("last 5 days", now).unwrap();
+        assert_eq!((end - start).num_days(), 5);
+    }
+
+    #[test]
+    fn parse_time_range_iso_datetime() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("2025-11-15T14:00:00Z", now).unwrap();
+        assert_eq!(
+            start.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap()
+        );
+        assert_eq!(
+            end.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_time_range_date_only() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("2025-11-15", now).unwrap();
+        assert_eq!(
+            start.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap()
+        );
+        assert_eq!(
+            end.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_time_range_naive_datetime() {
+        let now = fixed_now();
+        let (start, end) = parse_time_range("2025-11-15T14:00:00", now).unwrap();
+        assert_eq!(
+            start.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap()
+        );
+        assert_eq!(
+            end.date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 15).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_time_range_invalid() {
+        let now = fixed_now();
+        assert!(parse_time_range("", now).is_none());
+        assert!(parse_time_range("some random text", now).is_none());
+        assert!(parse_time_range("null", now).is_none());
+    }
+
+    #[test]
+    fn parse_time_range_past_week_alias() {
+        let now = fixed_now();
+        let result = parse_time_range("past week", now);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn deduplicate_removes_dups() {
+        let e1 = MemoryEntry::new("fact one");
+        let e2 = MemoryEntry::new("fact two");
+        let e1_dup = e1.clone();
+        let results = deduplicate(vec![e1.clone(), e2.clone(), e1_dup]);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, e1.id);
+        assert_eq!(results[1].id, e2.id);
+    }
+
+    #[test]
+    fn deduplicate_empty() {
+        let results = deduplicate(Vec::new());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn deduplicate_no_dups() {
+        let entries = vec![
+            MemoryEntry::new("a"),
+            MemoryEntry::new("b"),
+            MemoryEntry::new("c"),
+        ];
+        assert_eq!(deduplicate(entries).len(), 3);
+    }
+}
