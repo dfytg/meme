@@ -188,6 +188,40 @@ Now answer the question. Return ONLY the JSON, no other text."#
     )
 }
 
+/// Build the memory conflict resolution prompt.
+///
+/// Given a new memory entry and a set of existing similar entries,
+/// determine which action to take for each pair.
+#[must_use]
+pub fn conflict_resolution(new_entry: &str, existing_entries: &[(usize, &str)]) -> String {
+    let mut existing_block = String::new();
+    for (idx, text) in existing_entries {
+        let _ = writeln!(existing_block, "[Existing {idx}] {text}");
+    }
+    format!(
+        r#"You are a memory conflict resolution assistant. A new memory is being stored, and similar existing memories were found. Determine the correct action for each existing memory.
+
+[New Memory]
+{new_entry}
+
+[Existing Similar Memories]
+{existing_block}
+For each existing memory, decide:
+- "keep_both": The memories contain genuinely different information, both should be kept.
+- "update": The new memory supersedes/updates the existing one (e.g., changed plans, corrected facts). The existing one should be deleted.
+- "duplicate": The new memory is essentially the same as the existing one. The new memory should be skipped (not stored).
+
+Return a JSON array with one decision per existing memory:
+```json
+[
+  {{"existing_index": 0, "action": "keep_both|update|duplicate", "reason": "brief explanation"}}
+]
+```
+
+Return ONLY the JSON array."#
+    )
+}
+
 /// Format memory entries as context string for answer generation.
 #[must_use]
 pub fn format_contexts(entries: &[MemoryEntry]) -> String {

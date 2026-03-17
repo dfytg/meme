@@ -235,7 +235,7 @@ impl HybridRetriever {
         ];
         let opts = ChatOptions {
             temperature: 0.2,
-            json_mode: false,
+            json_mode: true,
         };
 
         match self.llm.chat(&messages, &opts).await {
@@ -324,7 +324,7 @@ impl HybridRetriever {
         ];
         let opts = ChatOptions {
             temperature: 0.1,
-            json_mode: false,
+            json_mode: true,
         };
         let response = self.llm.chat(&messages, &opts).await?;
         extract_json_from_text(&response)
@@ -345,7 +345,7 @@ impl HybridRetriever {
         ];
         let opts = ChatOptions {
             temperature: 0.3,
-            json_mode: false,
+            json_mode: true,
         };
         let response = self.llm.chat(&messages, &opts).await?;
         let result = extract_json_from_text(&response)?;

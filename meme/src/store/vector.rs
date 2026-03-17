@@ -97,6 +97,8 @@ impl VectorStore {
 
         if tables.contains(&self.table_name) {
             tracing::info!(table = %self.table_name, "opened existing LanceDB table");
+            let table = self.get_table().await?;
+            self.ensure_fts_index(&table).await;
         } else {
             let schema = self.build_schema();
             self.db
@@ -273,6 +275,22 @@ impl VectorStore {
     pub async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
+        }
+        if entries.len() != vectors.len() {
+            return Err(Error::VectorStore(format!(
+                "entries/vectors length mismatch: {} vs {}",
+                entries.len(),
+                vectors.len()
+            )));
+        }
+        for (i, v) in vectors.iter().enumerate() {
+            if v.len() != self.dimension {
+                return Err(Error::VectorStore(format!(
+                    "vector[{i}] dimension mismatch: expected {}, got {}",
+                    self.dimension,
+                    v.len()
+                )));
+            }
         }
 
         let n = entries.len();
@@ -697,23 +715,44 @@ impl VectorStore {
             .map_err(|e| Error::VectorStore(format!("count failed: {e}")))
     }
 
-    /// Clear all data and reinitialize.
+    /// Clear entries matching the given scope, or all entries if scope is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete operation fails.
+    pub async fn clear(&self, scope: &Scope) -> Result<()> {
+        if let Some(clause) = scope.to_where_clause() {
+            let table = self.get_table().await?;
+            table
+                .delete(&clause)
+                .await
+                .map_err(|e| Error::VectorStore(format!("scoped clear failed: {e}")))?;
+            tracing::info!(table = %self.table_name, %clause, "cleared scoped entries");
+        } else {
+            self.clear_all().await?;
+        }
+        Ok(())
+    }
+
+    /// Drop and recreate the entire table. **Removes all tenants' data.**
     ///
     /// # Errors
     ///
     /// Returns an error if the table cannot be dropped or recreated.
-    pub async fn clear(&self) -> Result<()> {
+    pub async fn clear_all(&self) -> Result<()> {
         self.invalidate_cache().await;
         self.db
             .drop_table(&self.table_name, &[])
             .await
             .map_err(|e| Error::VectorStore(format!("drop table failed: {e}")))?;
         self.ensure_table().await?;
-        tracing::info!(table = %self.table_name, "cleared vector store");
+        tracing::info!(table = %self.table_name, "cleared entire vector store");
         Ok(())
     }
 
     /// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
+    ///
+    /// Uses ANN search per entry to find near-duplicates (O(n·k) instead of O(n²)).
     ///
     /// # Errors
     ///
@@ -733,11 +772,12 @@ impl VectorStore {
         let t0 = std::time::Instant::now();
         let (entries, vectors): (Vec<MemoryEntry>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
         let n = entries.len();
-        let mut importance: Vec<f64> = vec![1.0; n];
-        let mut dead: Vec<bool> = vec![false; n];
 
         let now = chrono::Utc::now();
         let max_age_secs = f64::from(max_age_days) * 86400.0;
+        let mut importance: Vec<f64> = vec![1.0; n];
+        let mut dead = std::collections::HashSet::new();
+
         let mut decayed = 0usize;
         for (i, entry) in entries.iter().enumerate() {
             let Some(ts) = entry.timestamp else { continue };
@@ -745,34 +785,53 @@ impl VectorStore {
             if age > max_age_secs {
                 importance[i] *= decay_factor;
                 if importance[i] < min_importance {
-                    dead[i] = true;
+                    dead.insert(i);
                 }
                 decayed += 1;
             }
         }
 
+        // ANN-based near-duplicate detection: query each live entry's neighbors.
+        let merge_k = 5;
+        let no_scope = Scope::default();
         let mut merged = 0usize;
         let mut ids_to_delete: Vec<String> = Vec::new();
+
+        // Build a lookup from entry ID → index for O(1) neighbor resolution.
+        let id_to_idx: std::collections::HashMap<uuid::Uuid, usize> =
+            entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+
         for i in 0..n {
-            if dead[i] {
+            if dead.contains(&i) {
                 continue;
             }
-            for j in (i + 1)..n {
-                if dead[j] {
+            let neighbors = self
+                .semantic_search(&vectors[i], merge_k, &no_scope)
+                .await?;
+            for neighbor in &neighbors {
+                if neighbor.id == entries[i].id {
                     continue;
                 }
-                if cosine_similarity(&vectors[i], &vectors[j]) >= merge_threshold {
+                let Some(&j) = id_to_idx.get(&neighbor.id) else {
+                    continue;
+                };
+                if dead.contains(&j) {
+                    continue;
+                }
+                let sim = cosine_similarity(&vectors[i], &vectors[j]);
+                if sim >= merge_threshold {
                     let loser = if importance[i] >= importance[j] { j } else { i };
-                    dead[loser] = true;
-                    ids_to_delete.push(entries[loser].id.to_string());
-                    merged += 1;
+                    if dead.insert(loser) {
+                        ids_to_delete.push(entries[loser].id.to_string());
+                        merged += 1;
+                    }
                 }
             }
         }
 
         let mut pruned = 0usize;
         for (i, entry) in entries.iter().enumerate() {
-            if !dead[i] && importance[i] < min_importance {
+            if !dead.contains(&i) && importance[i] < min_importance {
                 ids_to_delete.push(entry.id.to_string());
                 pruned += 1;
             }

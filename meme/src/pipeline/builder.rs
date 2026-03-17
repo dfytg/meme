@@ -198,12 +198,29 @@ impl MemoryBuilder {
         }
 
         let mut all_entries = Vec::new();
+        let mut errors = Vec::new();
         for handle in handles {
             match handle.await {
                 Ok(Ok(entries)) => all_entries.extend(entries),
-                Ok(Err(e)) => tracing::error!(error = %e, "parallel window failed"),
-                Err(e) => tracing::error!(error = %e, "task panicked"),
+                Ok(Err(e)) => {
+                    tracing::error!(error = %e, "parallel window failed");
+                    errors.push(e);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "task panicked");
+                    errors.push(Error::Internal(format!("task panicked: {e}")));
+                }
             }
+        }
+        if !errors.is_empty() && all_entries.is_empty() {
+            return Err(errors.into_iter().next().expect("non-empty errors"));
+        }
+        if !errors.is_empty() {
+            tracing::warn!(
+                failed = errors.len(),
+                succeeded = all_entries.len(),
+                "partial failure in parallel processing"
+            );
         }
 
         self.processed_count += total_dialogues;
@@ -241,7 +258,7 @@ async fn generate_entries_standalone(
 
     let opts = ChatOptions {
         temperature: 0.1,
-        json_mode: false,
+        json_mode: true,
     };
 
     let parse_retries = 2;

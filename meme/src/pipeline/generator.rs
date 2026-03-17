@@ -25,7 +25,7 @@ pub async fn generate(llm: &LlmClient, query: &str, contexts: &[MemoryEntry]) ->
     ];
     let opts = ChatOptions {
         temperature: 0.1,
-        json_mode: false,
+        json_mode: true,
     };
 
     let parse_retries = 2;

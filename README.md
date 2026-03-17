@@ -1,9 +1,15 @@
 # meme
 
+[![Crates.io][meme-crate]][meme-crate-url]
+[![Documentation][meme-doc]][meme-doc-url]
 [![CI][ci-badge]][ci-url]
 [![License][license-badge]][license-url]
 [![Rust][rust-badge]][rust-url]
 
+[meme-crate]: https://img.shields.io/crates/v/meme.svg
+[meme-crate-url]: https://crates.io/crates/meme
+[meme-doc]: https://img.shields.io/docsrs/meme.svg
+[meme-doc-url]: https://docs.rs/meme
 [ci-badge]: https://github.com/qntx/meme/actions/workflows/rust.yml/badge.svg
 [ci-url]: https://github.com/qntx/meme/actions/workflows/rust.yml
 [license-badge]: https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg

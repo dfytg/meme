@@ -192,13 +192,16 @@ impl Meme {
         self.store.count(&self.scope).await
     }
 
-    /// Clear all stored memories.
+    /// Clear stored memories for the current scope.
+    ///
+    /// If a user/session scope is set, only that scope's entries are removed.
+    /// If no scope is set, **all** entries are removed.
     ///
     /// # Errors
     ///
     /// Returns an error if the clear operation fails.
     pub async fn clear(&self) -> Result<()> {
-        self.store.clear().await
+        self.store.clear(&self.scope).await
     }
 
     /// Get a reference to the configuration.
@@ -208,27 +211,127 @@ impl Meme {
     }
 
     async fn store_entries(&self, entries: &[MemoryEntry]) -> Result<()> {
-        let mut owned: Vec<MemoryEntry>;
-        let final_entries = if self.scope.user_id.is_some() || self.scope.session_id.is_some() {
-            owned = entries.to_vec();
-            for entry in &mut owned {
-                if entry.user_id.is_none() {
-                    entry.user_id.clone_from(&self.scope.user_id);
+        let mut scoped: Vec<MemoryEntry> = entries.to_vec();
+        for entry in &mut scoped {
+            if entry.user_id.is_none() {
+                entry.user_id.clone_from(&self.scope.user_id);
+            }
+            if entry.session_id.is_none() {
+                entry.session_id.clone_from(&self.scope.session_id);
+            }
+        }
+
+        let texts: Vec<&str> = scoped.iter().map(|e| e.restatement.as_str()).collect();
+        let vectors = self.embedder.encode_documents(&texts).await?;
+
+        let (accepted, accepted_vecs, ids_to_delete) =
+            self.resolve_conflicts(&scoped, &vectors).await?;
+
+        if !ids_to_delete.is_empty() {
+            self.store.delete_entries(&ids_to_delete).await?;
+            tracing::info!(count = ids_to_delete.len(), "deleted superseded memories");
+        }
+
+        if !accepted.is_empty() {
+            self.store.add_entries(&accepted, &accepted_vecs).await?;
+        }
+        Ok(())
+    }
+
+    /// Check each new entry against existing similar memories and resolve conflicts.
+    ///
+    /// Returns (entries to insert, their vectors, IDs to delete from store).
+    async fn resolve_conflicts(
+        &self,
+        entries: &[MemoryEntry],
+        vectors: &[Vec<f32>],
+    ) -> Result<(Vec<MemoryEntry>, Vec<Vec<f32>>, Vec<String>)> {
+        let mut accepted = Vec::new();
+        let mut accepted_vecs = Vec::new();
+        let mut ids_to_delete = Vec::new();
+
+        let existing_count = self.store.count(&self.scope).await?;
+        if existing_count == 0 {
+            return Ok((entries.to_vec(), vectors.to_vec(), Vec::new()));
+        }
+
+        let similarity_top_k = 3;
+        for (i, entry) in entries.iter().enumerate() {
+            let similar = self
+                .store
+                .semantic_search(&vectors[i], similarity_top_k, &self.scope)
+                .await?;
+
+            if similar.is_empty() {
+                accepted.push(entry.clone());
+                accepted_vecs.push(vectors[i].clone());
+                continue;
+            }
+
+            let existing_pairs: Vec<(usize, &str)> = similar
+                .iter()
+                .enumerate()
+                .map(|(j, e)| (j, e.restatement.as_str()))
+                .collect();
+
+            match self
+                .resolve_single_conflict(&entry.restatement, &existing_pairs)
+                .await
+            {
+                Ok(actions) => {
+                    let mut is_duplicate = false;
+                    for action in &actions {
+                        let act = action["action"].as_str().unwrap_or("keep_both");
+                        let idx = action["existing_index"].as_u64().unwrap_or(u64::MAX) as usize;
+                        match act {
+                            "duplicate" => {
+                                is_duplicate = true;
+                                tracing::info!(
+                                    new = entry.restatement.as_str(),
+                                    "skipping duplicate memory"
+                                );
+                            }
+                            "update" if idx < similar.len() => {
+                                ids_to_delete.push(similar[idx].id.to_string());
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !is_duplicate {
+                        accepted.push(entry.clone());
+                        accepted_vecs.push(vectors[i].clone());
+                    }
                 }
-                if entry.session_id.is_none() {
-                    entry.session_id.clone_from(&self.scope.session_id);
+                Err(e) => {
+                    tracing::warn!(error = %e, "conflict resolution failed, keeping entry");
+                    accepted.push(entry.clone());
+                    accepted_vecs.push(vectors[i].clone());
                 }
             }
-            owned.as_slice()
-        } else {
-            entries
+        }
+
+        Ok((accepted, accepted_vecs, ids_to_delete))
+    }
+
+    async fn resolve_single_conflict(
+        &self,
+        new_text: &str,
+        existing: &[(usize, &str)],
+    ) -> Result<Vec<serde_json::Value>> {
+        let prompt_text = llm::prompt::conflict_resolution(new_text, existing);
+        let messages = vec![
+            llm::Message::system(
+                "You are a memory conflict resolution assistant. You must output valid JSON format.",
+            ),
+            llm::Message::user(prompt_text),
+        ];
+        let opts = llm::ChatOptions {
+            temperature: 0.1,
+            json_mode: true,
         };
-        let texts: Vec<&str> = final_entries
-            .iter()
-            .map(|e| e.restatement.as_str())
-            .collect();
-        let vectors = self.embedder.encode_documents(&texts).await?;
-        self.store.add_entries(final_entries, &vectors).await
+        let response = self.llm.chat(&messages, &opts).await?;
+        let data = llm::extract_json_from_text(&response)?;
+        Ok(data.as_array().cloned().unwrap_or_default())
     }
 }
 
@@ -350,7 +453,7 @@ impl MemeBuilder {
         );
 
         if self.clear_db {
-            store.clear().await?;
+            store.clear_all().await?;
         }
 
         let mem_builder = MemoryBuilder::new(
