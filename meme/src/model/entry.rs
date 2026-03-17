@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// - **Semantic**: the `restatement` text is embedded as a dense vector
 /// - **Lexical**: `keywords` enable BM25-style exact matching
 /// - **Symbolic**: structured metadata (`timestamp`, `location`, `persons`, `entities`, `topic`)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryEntry {
     /// Unique identifier.
     pub id: Uuid,

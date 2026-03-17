@@ -237,17 +237,18 @@ pub fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
 
 fn strip_prefixes(text: &str) -> &str {
     let prefixes = [
-        "Here's the JSON:",
-        "Here is the JSON:",
-        "The JSON is:",
-        "JSON:",
-        "Result:",
-        "Output:",
-        "Answer:",
+        "here's the json:",
+        "here is the json:",
+        "the json is:",
+        "json:",
+        "result:",
+        "output:",
+        "answer:",
     ];
+    let lower = text.to_lowercase();
     for prefix in prefixes {
-        if let Some(rest) = text.strip_prefix(prefix) {
-            return rest.trim();
+        if lower.starts_with(prefix) {
+            return text[prefix.len()..].trim();
         }
     }
     text
@@ -290,7 +291,7 @@ fn cleanup_json(s: &str) -> String {
     static RE_TRAILING_COMMA: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r",(\s*[}\]])").expect("valid regex"));
     static RE_LINE_COMMENT: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"//.*$").expect("valid regex"));
+        LazyLock::new(|| regex::Regex::new(r"(?m)//.*$").expect("valid regex"));
 
     let s = RE_TRAILING_COMMA.replace_all(s, "$1");
     RE_LINE_COMMENT.replace_all(&s, "").trim().to_owned()

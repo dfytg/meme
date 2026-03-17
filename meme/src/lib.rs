@@ -29,7 +29,6 @@
 //! # }
 //! ```
 
-#![allow(clippy::future_not_send)]
 #![allow(clippy::missing_fields_in_debug)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_possible_truncation)]
@@ -77,6 +76,7 @@ impl std::fmt::Debug for Meme {
     }
 }
 
+#[allow(clippy::future_not_send)]
 impl Meme {
     /// Create a builder for configuring a new `Meme` instance.
     #[must_use]

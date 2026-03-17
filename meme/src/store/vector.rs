@@ -47,6 +47,9 @@ pub trait VectorStore: Send + Sync {
 
     /// Clear all data and reinitialize.
     async fn clear(&self) -> Result<()>;
+
+    /// Optimize storage after bulk insertions for better query performance.
+    async fn optimize(&self) -> Result<()>;
 }
 
 /// LanceDB-backed vector store.
@@ -430,6 +433,34 @@ impl VectorStore for LanceDbStore {
             return Ok(Vec::new());
         }
 
+        let fts_query = keywords.join(" ");
+
+        // Try FTS first (uses Tantivy index on restatement column).
+        match table
+            .query()
+            .full_text_search(lancedb::index::scalar::FullTextSearchQuery::new(
+                fts_query.clone(),
+            ))
+            .limit(top_k)
+            .execute()
+            .await
+        {
+            Ok(stream) => {
+                let batches: Vec<RecordBatch> = stream
+                    .try_collect()
+                    .await
+                    .map_err(|e| Error::VectorStore(format!("FTS collect failed: {e}")))?;
+                return Ok(batches
+                    .iter()
+                    .flat_map(|b| self.batch_to_entries(b))
+                    .collect());
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "FTS search unavailable, falling back to LIKE");
+            }
+        }
+
+        // Fallback to LIKE pattern matching.
         let conditions: Vec<String> = keywords
             .iter()
             .map(|kw| {
@@ -614,6 +645,16 @@ impl VectorStore for LanceDbStore {
             .map_err(|e| Error::VectorStore(format!("drop table failed: {e}")))?;
         self.ensure_table().await?;
         tracing::info!(table = %self.table_name, "cleared vector store");
+        Ok(())
+    }
+
+    async fn optimize(&self) -> Result<()> {
+        let table = self.get_table().await?;
+        table
+            .optimize(lancedb::table::OptimizeAction::All)
+            .await
+            .map_err(|e| Error::VectorStore(format!("optimize failed: {e}")))?;
+        tracing::info!(table = %self.table_name, "vector store optimized");
         Ok(())
     }
 }

@@ -137,7 +137,7 @@ impl MemoryBuilder {
         let end = self.window_size.min(self.dialogue_buffer.len());
         let window: Vec<Dialogue> = self.dialogue_buffer[..end].to_vec();
         let advance = self.step_size.min(self.dialogue_buffer.len());
-        self.dialogue_buffer = self.dialogue_buffer[advance..].to_vec();
+        drop(self.dialogue_buffer.drain(..advance));
 
         tracing::info!(
             window_size = window.len(),
