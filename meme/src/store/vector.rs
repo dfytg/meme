@@ -846,7 +846,7 @@ mod tests {
     fn cosine_similarity_arbitrary() {
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![4.0, 5.0, 6.0];
-        let dot = 1.0 * 4.0 + 2.0 * 5.0 + 3.0 * 6.0;
+        let dot = 3.0f64.mul_add(6.0, 2.0f64.mul_add(5.0, 1.0 * 4.0));
         let mag_a = (1.0_f64 + 4.0 + 9.0).sqrt();
         let mag_b = (16.0_f64 + 25.0 + 36.0).sqrt();
         let expected = dot / (mag_a * mag_b);

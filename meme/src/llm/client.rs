@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn extract_json_direct_array() {
-        let v = extract_json_from_text(r#"[1, 2, 3]"#).unwrap();
+        let v = extract_json_from_text(r"[1, 2, 3]").unwrap();
         assert_eq!(v.as_array().unwrap().len(), 3);
     }
 

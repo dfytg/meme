@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn metadata_filter_not_empty_with_timestamp() {
-        let now = chrono::Utc::now();
+        let now = Utc::now();
         let f = MetadataFilter {
             timestamp_range: Some((now, now)),
             ..Default::default()
