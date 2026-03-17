@@ -363,7 +363,19 @@ async fn resolve_single_conflict_static(
     };
     let response = llm.chat(&messages, &opts).await?;
     let data = llm::extract_json_from_text(&response)?;
-    Ok(data.as_array().cloned().unwrap_or_default())
+    // Accept: bare array, {"decisions": [...]}, or any object wrapping an array.
+    let arr = data
+        .as_array()
+        .cloned()
+        .or_else(|| {
+            data.as_object().and_then(|obj| {
+                obj.get("decisions")
+                    .and_then(|v| v.as_array().cloned())
+                    .or_else(|| obj.values().find_map(|v| v.as_array().cloned()))
+            })
+        })
+        .unwrap_or_default();
+    Ok(arr)
 }
 
 /// Builder for constructing a [`Meme`] instance.

@@ -30,23 +30,25 @@ pub fn extraction(dialogue_text: &str, context: &str) -> String {
    - topic: The topic of this information
 
 [Output Format]
-Return a JSON array, each element is a memory entry:
+Return a JSON object containing an "entries" array:
 
 ```json
-[
-  {{
-    "lossless_restatement": "Complete unambiguous restatement (must include all subjects, objects, time, location, etc.)",
-    "keywords": ["keyword1", "keyword2"],
-    "timestamp": "YYYY-MM-DDTHH:MM:SSZ or null",
-    "location": "location name or null",
-    "persons": ["name1", "name2"],
-    "entities": ["entity1", "entity2"],
-    "topic": "topic phrase"
-  }}
-]
+{{
+  "entries": [
+    {{
+      "lossless_restatement": "Complete unambiguous restatement (must include all subjects, objects, time, location, etc.)",
+      "keywords": ["keyword1", "keyword2"],
+      "timestamp": "YYYY-MM-DDTHH:MM:SSZ or null",
+      "location": "location name or null",
+      "persons": ["name1", "name2"],
+      "entities": ["entity1", "entity2"],
+      "topic": "topic phrase"
+    }}
+  ]
+}}
 ```
 
-Now process the above dialogues. Return ONLY the JSON array, no other explanations."#
+Now process the above dialogues. Return ONLY the JSON object, no other explanations."#
     )
 }
 
@@ -211,14 +213,16 @@ For each existing memory, decide:
 - "update": The new memory supersedes/updates the existing one (e.g., changed plans, corrected facts). The existing one should be deleted.
 - "duplicate": The new memory is essentially the same as the existing one. The new memory should be skipped (not stored).
 
-Return a JSON array with one decision per existing memory:
+Return a JSON object with a "decisions" array, one decision per existing memory:
 ```json
-[
-  {{"existing_index": 0, "action": "keep_both|update|duplicate", "reason": "brief explanation"}}
-]
+{{
+  "decisions": [
+    {{"existing_index": 0, "action": "keep_both|update|duplicate", "reason": "brief explanation"}}
+  ]
+}}
 ```
 
-Return ONLY the JSON array."#
+Return ONLY the JSON object."#
     )
 }
 

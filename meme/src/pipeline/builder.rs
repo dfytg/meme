@@ -287,12 +287,13 @@ async fn generate_entries_standalone(
 fn parse_entries_response(response: &str) -> Result<Vec<MemoryEntry>> {
     let data = extract_json_from_text(response)?;
 
-    // Accept a bare array or an object wrapping one (e.g. {"memories": [...]}).
+    // Accept: {"entries": [...]}, any object wrapping an array, or a bare array.
     let arr = if let Some(a) = data.as_array() {
         a.clone()
     } else if let Some(obj) = data.as_object() {
-        obj.values()
-            .find_map(|v| v.as_array().cloned())
+        obj.get("entries")
+            .and_then(|v| v.as_array().cloned())
+            .or_else(|| obj.values().find_map(|v| v.as_array().cloned()))
             .ok_or_else(|| Error::JsonParse("object contains no array field".to_owned()))?
     } else {
         return Err(Error::JsonParse("expected JSON array or object".to_owned()));
