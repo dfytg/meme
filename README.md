@@ -17,9 +17,9 @@
 [rust-badge]: https://img.shields.io/badge/rust-edition%202024-orange.svg
 [rust-url]: https://doc.rust-lang.org/edition-guide/
 
-**High-performance long-term memory for AI agents — three-stage pipeline with semantic compression, hybrid retrieval, and persistent vector storage, written in Rust.**
+**High-performance long-term memory for AI agents — production-grade pipeline with semantic compression, lifecycle reconciliation, full CRUD, hybrid retrieval, and persistent vector storage, written in Rust.**
 
-meme implements the [SimpleMem](https://github.com/aiming-lab/SimpleMem) three-stage memory pipeline with a production-grade Rust core: (1) **Semantic Structured Compression** extracts lossless, disambiguated memory entries from dialogues via LLM, (2) **Online Semantic Synthesis** deduplicates at write time, and (3) **Intent-Aware Retrieval Planning** combines semantic, lexical (FTS), and structured metadata search with LLM-driven reflection. Memory is stored persistently on disk via LanceDB.
+meme implements a production-grade memory pipeline with a Rust core: (1) **Semantic Structured Compression** extracts lossless, disambiguated memory entries from dialogues or raw facts via LLM, (2) **Lifecycle Reconciliation** deduplicates and manages ADD/UPDATE/DELETE/NOOP via LLM-driven conflict resolution at write time, and (3) **Intent-Aware Retrieval Planning** combines semantic, lexical (FTS), and structured metadata search with LLM-driven reflection. Memory is stored persistently on disk via LanceDB with full change history tracking.
 
 ## Quick Start
 
@@ -47,18 +47,33 @@ meme init
 meme add -s Alice "I'll be in Tokyo next Monday for the conference."
 meme add -s Bob "Let's meet at Shibuya station at 3pm."
 
+# Add raw facts (no speaker needed)
+meme add "Alice prefers coffee over tea"
+
 # Import from JSONL file
 meme add --file conversation.jsonl
 
 # Ask questions
 meme ask "Where will Alice and Bob meet?"
 
+# Semantic search
+meme search "Alice travel plans"
+
+# CRUD operations
+meme get <uuid>
+meme update <uuid> "Updated content here"
+meme delete <uuid>
+
+# View change history
+meme history <uuid>
+
 # List stored memories
 meme list
-meme list --json
+meme list --json --limit 50
 
 # Export / import
 meme export -o memories.json
+meme import memories.json
 ```
 
 ### Library
@@ -72,12 +87,24 @@ let meme = MemeBuilder::new()
     .build()
     .await?;
 
-// Add dialogues — automatically extracted into structured memory entries.
+// Dialogue-based ingestion — automatically extracted into structured memory entries.
 meme.add_dialogue("Alice", "Let's meet at 2pm tomorrow", None).await?;
 meme.add_dialogue("Bob", "Sure, I'll bring the Q3 report", None).await?;
 meme.finalize().await?;
 
-// Ask questions — hybrid retrieval + LLM answer generation.
+// Direct fact ingestion — bypasses dialogue windowing.
+meme.add("Alice prefers coffee over tea").await?;
+
+// CRUD operations.
+let results = meme.search("Alice meeting").await?;
+let entry = meme.get(results[0].id).await?;
+meme.update(results[0].id, "Alice prefers tea over coffee").await?;
+meme.delete(results[0].id).await?;
+
+// Change history tracking.
+let events = meme.history(results[0].id).await?;
+
+// Q&A — hybrid retrieval + LLM answer generation.
 let answer = meme.ask("When will Alice meet?").await?;
 ```
 
@@ -99,6 +126,8 @@ let meme = MemeBuilder::new()
     .api_key("sk-...")
     .model("gpt-4.1-mini")
     .base_url("https://api.openai.com/v1")
+    .user_id("alice")           // multi-tenant isolation
+    .session_id("session-001")  // multi-session isolation
     .build()
     .await?;
 ```
@@ -158,6 +187,9 @@ enable_reflection = true                # iterative completeness checking
 max_reflection_rounds = 2
 max_build_workers = 16                  # parallel extraction workers
 max_retrieval_workers = 8               # parallel search workers
+enable_rerank = false                   # LLM-based reranking
+# custom_extraction_prompt = "..."      # override built-in extraction prompt
+# custom_answer_prompt = "..."          # override built-in answer prompt
 ```
 
 </details>
@@ -166,15 +198,25 @@ max_retrieval_workers = 8               # parallel search workers
 
 ```mermaid
 flowchart TB
-    subgraph Write["Write Path (Stage 1 + 2)"]
-        D[Dialogues] --> W[Windowing]
+    subgraph Write["Write Path"]
+        D["Dialogues / Facts"] --> W[Windowing]
         W --> LLM1["LLM Extraction<br/><i>Semantic Structured Compression</i>"]
         LLM1 --> E[MemoryEntry]
         E --> EMB1[Embedding]
-        EMB1 --> VS[(VectorStore<br/>LanceDB)]
+        EMB1 --> RC{"LLM Reconciliation<br/><i>ADD / UPDATE / DELETE / NOOP</i>"}
+        RC --> VS[(VectorStore<br/>LanceDB)]
+        RC --> HS[(HistoryStore<br/>Change Tracking)]
     end
 
-    subgraph Read["Read Path (Stage 3)"]
+    subgraph CRUD["CRUD API"]
+        GA["get(id)"] --> VS
+        UA["update(id, content)"] --> VS
+        DA["delete(id)"] --> VS
+        SA["search(query)"] --> VS
+        HA["history(id)"] --> HS
+    end
+
+    subgraph Read["Read Path"]
         Q[Query] --> P["LLM Planning<br/><i>Intent-Aware Retrieval</i>"]
         P --> S1[Semantic Search<br/>dense vectors]
         P --> S2[Keyword Search<br/>FTS / Tantivy]
@@ -196,11 +238,11 @@ Each `MemoryEntry` is a self-contained, unambiguous unit of knowledge stored wit
 | **Lexical** | Inverted index | Exact term matching | FTS (Tantivy) + BM25-style keywords |
 | **Symbolic** | Structured metadata | Filtered lookup | Timestamp, location, persons, entities, topic |
 
-## Three-Stage Pipeline
+## Pipeline
 
 ### Stage 1: Semantic Structured Compression
 
-Raw dialogues are split into overlapping windows and sent to an LLM. The LLM extracts **atomic, self-contained memory entries** — each entry is a complete, independent fact with all pronouns resolved and all timestamps converted to absolute ISO 8601 format. This ensures every entry can be retrieved and understood without surrounding context.
+Raw dialogues (or direct facts via `add()`) are split into overlapping windows and sent to an LLM. The LLM extracts **atomic, self-contained memory entries** — each entry is a complete, independent fact with all pronouns resolved and all timestamps converted to absolute ISO 8601 format.
 
 Each entry contains:
 
@@ -208,9 +250,18 @@ Each entry contains:
 - **Keywords** — core terms for BM25-style lexical matching
 - **Structured metadata** — ISO 8601 timestamp, location, person names, entity names, topic phrase
 
-### Stage 2: Online Semantic Synthesis
+### Stage 2: Lifecycle Reconciliation
 
-During extraction, the previous window's entries are passed as context to the LLM. This prevents duplicating information across overlapping windows — the LLM can see what was already captured and focuses on new facts. Unlike offline consolidation systems that run as background jobs, this synthesis happens inline during the write path with zero additional latency.
+New entries are reconciled against existing memories in a single LLM call. For each new fact, the LLM decides:
+
+| Action | When | Effect |
+| --- | --- | --- |
+| **ADD** | Genuinely new information | Store the new entry |
+| **UPDATE** | Supersedes an existing memory | Delete old + store new |
+| **DELETE** | Contradicts an existing memory | Remove the obsolete entry |
+| **NOOP** | Duplicate of existing memory | Skip (no storage) |
+
+All write operations are tracked in the `HistoryStore` for audit and debugging.
 
 ### Stage 3: Intent-Aware Retrieval Planning
 
@@ -223,6 +274,18 @@ A single LLM call analyzes the user's query and produces a **unified retrieval p
 The plan drives **parallel execution** of all three search layers (semantic, keyword, structured). Results are merged via ID-based deduplication.
 
 When reflection is enabled, the system iteratively assesses completeness: if retrieved context is insufficient, additional targeted queries are generated and executed until the information requirement is satisfied or the max reflection rounds are reached.
+
+## Benchmark
+
+`meme-bench` evaluates memory quality using the [LOCOMO](https://github.com/snap-stanford/locomo) benchmark format:
+
+```bash
+MEME_LLM_API_KEY=sk-... meme-bench run --dataset locomo10.json
+meme-bench run --dataset data.json --model gpt-4.1-mini --output report.json
+meme-bench sample -o sample_bench.json  # generate sample dataset
+```
+
+Metrics: token-level F1, precision, recall, exact match — per question category (single-hop, temporal, commonsense, open-domain, adversarial).
 
 ## License
 
