@@ -340,6 +340,8 @@ fn parse_entries_response(response: &str) -> Result<Vec<MemoryEntry>> {
             persons,
             entities: entities_list,
             topic,
+            user_id: None,
+            session_id: None,
         });
     }
 

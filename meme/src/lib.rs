@@ -50,7 +50,7 @@ use error::Result;
 use llm::LlmClient;
 use model::{Dialogue, MemoryEntry};
 use pipeline::{HybridRetriever, MemoryBuilder};
-use store::VectorStore;
+use store::{Scope, VectorStore};
 use tokio::sync::Mutex;
 
 /// The main entry point for the meme memory system.
@@ -64,6 +64,7 @@ pub struct Meme {
     builder: Mutex<MemoryBuilder>,
     retriever: HybridRetriever,
     config: Config,
+    scope: Scope,
 }
 
 impl std::fmt::Debug for Meme {
@@ -107,6 +108,26 @@ impl Meme {
             self.store_entries(&entries).await?;
         }
         Ok(())
+    }
+
+    /// Import pre-existing memory entries by recomputing embeddings and storing them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if embedding computation or storage fails.
+    pub async fn import_entries(&self, entries: &mut [MemoryEntry]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        for entry in entries.iter_mut() {
+            if entry.user_id.is_none() {
+                entry.user_id.clone_from(&self.scope.user_id);
+            }
+            if entry.session_id.is_none() {
+                entry.session_id.clone_from(&self.scope.session_id);
+            }
+        }
+        self.store_entries(entries).await
     }
 
     /// Batch add dialogues.
@@ -159,7 +180,7 @@ impl Meme {
     ///
     /// Returns an error if the read operation fails.
     pub async fn get_all_memories(&self) -> Result<Vec<MemoryEntry>> {
-        self.store.get_all().await
+        self.store.get_all(&self.scope).await
     }
 
     /// Count stored memory entries.
@@ -168,7 +189,7 @@ impl Meme {
     ///
     /// Returns an error if the count operation fails.
     pub async fn memory_count(&self) -> Result<usize> {
-        self.store.count().await
+        self.store.count(&self.scope).await
     }
 
     /// Clear all stored memories.
@@ -187,9 +208,27 @@ impl Meme {
     }
 
     async fn store_entries(&self, entries: &[MemoryEntry]) -> Result<()> {
-        let texts: Vec<&str> = entries.iter().map(|e| e.restatement.as_str()).collect();
+        let mut owned: Vec<MemoryEntry>;
+        let final_entries = if self.scope.user_id.is_some() || self.scope.session_id.is_some() {
+            owned = entries.to_vec();
+            for entry in &mut owned {
+                if entry.user_id.is_none() {
+                    entry.user_id.clone_from(&self.scope.user_id);
+                }
+                if entry.session_id.is_none() {
+                    entry.session_id.clone_from(&self.scope.session_id);
+                }
+            }
+            owned.as_slice()
+        } else {
+            entries
+        };
+        let texts: Vec<&str> = final_entries
+            .iter()
+            .map(|e| e.restatement.as_str())
+            .collect();
         let vectors = self.embedder.encode_documents(&texts).await?;
-        self.store.add_entries(entries, &vectors).await
+        self.store.add_entries(final_entries, &vectors).await
     }
 }
 
@@ -201,6 +240,8 @@ pub struct MemeBuilder {
     model: Option<String>,
     base_url: Option<String>,
     clear_db: bool,
+    user_id: Option<String>,
+    session_id: Option<String>,
 }
 
 impl MemeBuilder {
@@ -242,6 +283,20 @@ impl MemeBuilder {
     #[must_use]
     pub const fn clear_db(mut self, clear: bool) -> Self {
         self.clear_db = clear;
+        self
+    }
+
+    /// Set the user identifier for multi-tenant isolation.
+    #[must_use]
+    pub fn user_id(mut self, id: impl Into<String>) -> Self {
+        self.user_id = Some(id.into());
+        self
+    }
+
+    /// Set the session identifier for multi-session isolation.
+    #[must_use]
+    pub fn session_id(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
         self
     }
 
@@ -304,12 +359,18 @@ impl MemeBuilder {
             config.pipeline.max_build_workers,
         );
 
+        let scope = Scope {
+            user_id: self.user_id,
+            session_id: self.session_id,
+        };
+
         let retriever = HybridRetriever::new(
             Arc::clone(&llm),
             Arc::clone(&store),
             Arc::clone(&embedder),
             &config.pipeline,
             config.pipeline.max_retrieval_workers,
+            scope.clone(),
         );
 
         tracing::info!("meme system initialized");
@@ -321,6 +382,7 @@ impl MemeBuilder {
             builder: Mutex::new(mem_builder),
             retriever,
             config,
+            scope,
         })
     }
 }

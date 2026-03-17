@@ -19,6 +19,14 @@ pub struct AddCmd {
     /// Import dialogues from a JSONL file.
     #[arg(long, value_name = "FILE")]
     pub file: Option<String>,
+
+    /// User identifier for memory isolation.
+    #[arg(long)]
+    pub user_id: Option<String>,
+
+    /// Session identifier for memory isolation.
+    #[arg(long)]
+    pub session_id: Option<String>,
 }
 
 impl AddCmd {
@@ -54,10 +62,14 @@ impl AddCmd {
             })
             .transpose()?;
 
-        let meme = meme::MemeBuilder::new()
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut builder = meme::MemeBuilder::new();
+        if let Some(uid) = &self.user_id {
+            builder = builder.user_id(uid);
+        }
+        if let Some(sid) = &self.session_id {
+            builder = builder.session_id(sid);
+        }
+        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
         meme.add_dialogue(speaker, content, timestamp)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -96,10 +108,14 @@ impl AddCmd {
         }
 
         let count = dialogues.len();
-        let meme = meme::MemeBuilder::new()
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut builder = meme::MemeBuilder::new();
+        if let Some(uid) = &self.user_id {
+            builder = builder.user_id(uid);
+        }
+        if let Some(sid) = &self.session_id {
+            builder = builder.session_id(sid);
+        }
+        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
         meme.add_dialogues(dialogues)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;

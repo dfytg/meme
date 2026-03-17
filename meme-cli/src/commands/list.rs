@@ -13,6 +13,14 @@ pub struct ListCmd {
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
+
+    /// User identifier for memory isolation.
+    #[arg(long)]
+    pub user_id: Option<String>,
+
+    /// Session identifier for memory isolation.
+    #[arg(long)]
+    pub session_id: Option<String>,
 }
 
 impl ListCmd {
@@ -22,10 +30,14 @@ impl ListCmd {
     ///
     /// Returns an error if the query fails.
     pub async fn run(&self) -> anyhow::Result<()> {
-        let meme = meme::MemeBuilder::new()
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut builder = meme::MemeBuilder::new();
+        if let Some(uid) = &self.user_id {
+            builder = builder.user_id(uid);
+        }
+        if let Some(sid) = &self.session_id {
+            builder = builder.session_id(sid);
+        }
+        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let entries = meme
             .get_all_memories()

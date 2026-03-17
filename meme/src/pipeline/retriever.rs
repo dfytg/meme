@@ -11,7 +11,7 @@ use crate::embedding::Embedder;
 use crate::error::Result;
 use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text, prompt};
 use crate::model::{MemoryEntry, MetadataFilter};
-use crate::store::VectorStore;
+use crate::store::{Scope, VectorStore};
 
 /// Hybrid retriever that combines semantic, lexical, and symbolic search
 /// with LLM-driven intent analysis and reflection.
@@ -19,6 +19,7 @@ pub struct HybridRetriever {
     llm: Arc<LlmClient>,
     store: Arc<VectorStore>,
     embedder: Arc<Embedder>,
+    scope: Scope,
     semantic_top_k: usize,
     keyword_top_k: usize,
     structured_top_k: usize,
@@ -47,11 +48,13 @@ impl HybridRetriever {
         embedder: Arc<Embedder>,
         pipeline_cfg: &PipelineConfig,
         max_retrieval_workers: usize,
+        scope: Scope,
     ) -> Self {
         Self {
             llm,
             store,
             embedder,
+            scope,
             semantic_top_k: pipeline_cfg.semantic_top_k,
             keyword_top_k: pipeline_cfg.keyword_top_k,
             structured_top_k: pipeline_cfg.structured_top_k,
@@ -118,7 +121,7 @@ impl HybridRetriever {
     async fn semantic_search(&self, query: &str) -> Result<Vec<MemoryEntry>> {
         let query_vec = self.embedder.encode_query(query).await?;
         self.store
-            .semantic_search(&query_vec, self.semantic_top_k)
+            .semantic_search(&query_vec, self.semantic_top_k, &self.scope)
             .await
     }
 
@@ -140,7 +143,7 @@ impl HybridRetriever {
             return Ok(Vec::new());
         }
         self.store
-            .keyword_search(&keywords, self.keyword_top_k)
+            .keyword_search(&keywords, self.keyword_top_k, &self.scope)
             .await
     }
 
@@ -185,7 +188,7 @@ impl HybridRetriever {
         }
 
         self.store
-            .structured_search(&filter, self.structured_top_k)
+            .structured_search(&filter, self.structured_top_k, &self.scope)
             .await
     }
 
@@ -203,10 +206,11 @@ impl HybridRetriever {
             let top_k = self.semantic_top_k;
             let q = query.clone();
             let sem = Arc::clone(&semaphore);
+            let scope = self.scope.clone();
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await;
                 let query_vec = embedder.encode_query(&q).await?;
-                store.semantic_search(&query_vec, top_k).await
+                store.semantic_search(&query_vec, top_k, &scope).await
             }));
         }
 

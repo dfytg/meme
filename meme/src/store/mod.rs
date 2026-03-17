@@ -2,4 +2,4 @@
 
 mod vector;
 
-pub use vector::{ConsolidationStats, VectorStore};
+pub use vector::{ConsolidationStats, Scope, VectorStore};

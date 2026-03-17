@@ -8,6 +8,14 @@ pub struct ExportCmd {
     /// Output file path (stdout if not specified).
     #[arg(short, long)]
     pub output: Option<String>,
+
+    /// User identifier for memory isolation.
+    #[arg(long)]
+    pub user_id: Option<String>,
+
+    /// Session identifier for memory isolation.
+    #[arg(long)]
+    pub session_id: Option<String>,
 }
 
 impl ExportCmd {
@@ -17,10 +25,14 @@ impl ExportCmd {
     ///
     /// Returns an error if the export fails.
     pub async fn run(&self) -> anyhow::Result<()> {
-        let meme = meme::MemeBuilder::new()
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut builder = meme::MemeBuilder::new();
+        if let Some(uid) = &self.user_id {
+            builder = builder.user_id(uid);
+        }
+        if let Some(sid) = &self.session_id {
+            builder = builder.session_id(sid);
+        }
+        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let entries = meme
             .get_all_memories()
@@ -45,6 +57,14 @@ impl ExportCmd {
 pub struct ImportCmd {
     /// Input file path.
     pub file: String,
+
+    /// User identifier for memory isolation.
+    #[arg(long)]
+    pub user_id: Option<String>,
+
+    /// Session identifier for memory isolation.
+    #[arg(long)]
+    pub session_id: Option<String>,
 }
 
 impl ImportCmd {
@@ -53,16 +73,29 @@ impl ImportCmd {
     /// # Errors
     ///
     /// Returns an error if the import fails.
-    #[allow(clippy::unused_async)]
     pub async fn run(&self) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(&self.file)?;
-        let entries: Vec<meme::model::MemoryEntry> = serde_json::from_str(&content)?;
+        let mut entries: Vec<meme::model::MemoryEntry> = serde_json::from_str(&content)?;
 
         let count = entries.len();
-        println!("Parsed {count} entries from {}", self.file);
-        println!("Note: Direct entry import requires embedding recomputation.");
-        println!("Use `meme add --file` for JSONL dialogue import instead.");
+        println!(
+            "Importing {count} entries from {} (recomputing embeddings)...",
+            self.file
+        );
 
+        let mut builder = meme::MemeBuilder::new();
+        if let Some(uid) = &self.user_id {
+            builder = builder.user_id(uid);
+        }
+        if let Some(sid) = &self.session_id {
+            builder = builder.session_id(sid);
+        }
+        let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        meme.import_entries(&mut entries)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        println!("Imported {count} entries successfully.");
         Ok(())
     }
 }

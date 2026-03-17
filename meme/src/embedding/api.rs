@@ -12,6 +12,7 @@ pub struct ApiEmbedding {
     api_key: String,
     model: String,
     dimension: usize,
+    max_retries: u32,
 }
 
 impl ApiEmbedding {
@@ -29,6 +30,7 @@ impl ApiEmbedding {
             api_key: api_key.into(),
             model: model.into(),
             dimension,
+            max_retries: 3,
         }
     }
 
@@ -86,6 +88,25 @@ impl ApiEmbedding {
     }
 
     async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        let mut last_err = None;
+        for attempt in 0..self.max_retries {
+            match self.call_embed_api(&input).await {
+                Ok(vectors) => return Ok(vectors),
+                Err(e) => {
+                    tracing::warn!(attempt = attempt + 1, error = %e, "embedding API call failed");
+                    last_err = Some(e);
+                    if attempt + 1 < self.max_retries {
+                        let wait = 1u64 << attempt;
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    }
+                }
+            }
+        }
+        Err(last_err
+            .unwrap_or_else(|| Error::Embedding("all embedding retries exhausted".to_owned())))
+    }
+
+    async fn call_embed_api(&self, input: &[String]) -> Result<Vec<Vec<f32>>> {
         let url = format!("{}/embeddings", self.base_url);
 
         let body = serde_json::json!({

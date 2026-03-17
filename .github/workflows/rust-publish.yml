@@ -36,9 +36,4 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          for pkg in meme meme-cli; do
-            echo "Publishing $pkg..."
-            cargo publish -p "$pkg"
-            echo "Waiting for crates.io to index $pkg..."
-            sleep 30
-          done
+          cargo publish

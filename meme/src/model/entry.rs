@@ -29,6 +29,12 @@ pub struct MemoryEntry {
     pub entities: Vec<String>,
     /// Topic phrase.
     pub topic: Option<String>,
+    /// Owner user identifier for multi-tenant isolation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    /// Session identifier for multi-session isolation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 impl MemoryEntry {
@@ -44,6 +50,8 @@ impl MemoryEntry {
             persons: Vec::new(),
             entities: Vec::new(),
             topic: None,
+            user_id: None,
+            session_id: None,
         }
     }
 }

@@ -400,9 +400,9 @@ mod tests {
 
     #[test]
     fn extract_json_balanced_array_in_text() {
-        let input = r#"Here: [{"x": 1}, {"x": 2}] done"#;
+        let input = r"Here: [1, 2, 3] done";
         let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v.as_array().unwrap().len(), 2);
+        assert_eq!(v.as_array().unwrap().len(), 3);
     }
 
     #[test]

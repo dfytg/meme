@@ -1,6 +1,7 @@
 //! Vector store — multi-view indexing with `LanceDB`.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
@@ -13,11 +14,44 @@ use lancedb::query::{ExecutableQuery, QueryBase};
 use crate::error::{Error, Result};
 use crate::model::{MemoryEntry, MetadataFilter};
 
+/// Tenant scope for multi-user / multi-session isolation.
+///
+/// When set, all queries are automatically filtered to only return entries
+/// belonging to the specified user and/or session.
+#[derive(Debug, Clone, Default)]
+pub struct Scope {
+    /// Filter by user identifier.
+    pub user_id: Option<String>,
+    /// Filter by session identifier.
+    pub session_id: Option<String>,
+}
+
+impl Scope {
+    /// Build a SQL WHERE clause fragment for this scope.
+    /// Returns `None` if no scope is set.
+    fn to_where_clause(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(uid) = &self.user_id {
+            parts.push(format!("user_id = '{}'", escape_like(uid)));
+        }
+        if let Some(sid) = &self.session_id {
+            parts.push(format!("session_id = '{}'", escape_like(sid)));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" AND "))
+        }
+    }
+}
+
 /// `LanceDB`-backed vector store with multi-view indexing.
 pub struct VectorStore {
     db: lancedb::Connection,
     table_name: String,
     dimension: usize,
+    cached_table: tokio::sync::RwLock<Option<lancedb::Table>>,
+    fts_indexed: AtomicBool,
 }
 
 impl std::fmt::Debug for VectorStore {
@@ -46,6 +80,8 @@ impl VectorStore {
             db,
             table_name: table_name.to_owned(),
             dimension,
+            cached_table: tokio::sync::RwLock::new(None),
+            fts_indexed: AtomicBool::new(false),
         };
         store.ensure_table().await?;
         Ok(store)
@@ -83,6 +119,8 @@ impl VectorStore {
             Field::new("persons_text", DataType::Utf8, false),
             Field::new("entities_text", DataType::Utf8, false),
             Field::new("topic", DataType::Utf8, true),
+            Field::new("user_id", DataType::Utf8, true),
+            Field::new("session_id", DataType::Utf8, true),
             Field::new(
                 "vector",
                 DataType::FixedSizeList(
@@ -98,11 +136,44 @@ impl VectorStore {
     }
 
     async fn get_table(&self) -> Result<lancedb::Table> {
-        self.db
+        {
+            let guard = self.cached_table.read().await;
+            if let Some(table) = guard.as_ref() {
+                return Ok(table.clone());
+            }
+        }
+        let table = self
+            .db
             .open_table(&self.table_name)
             .execute()
             .await
-            .map_err(|e| Error::VectorStore(format!("open table failed: {e}")))
+            .map_err(|e| Error::VectorStore(format!("open table failed: {e}")))?;
+        *self.cached_table.write().await = Some(table.clone());
+        Ok(table)
+    }
+
+    async fn invalidate_cache(&self) {
+        *self.cached_table.write().await = None;
+        self.fts_indexed.store(false, Ordering::Relaxed);
+    }
+
+    async fn ensure_fts_index(&self, table: &lancedb::Table) {
+        if self.fts_indexed.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Err(e) = table
+            .create_index(
+                &["restatement"],
+                lancedb::index::Index::FTS(lancedb::index::scalar::FtsIndexBuilder::default()),
+            )
+            .execute()
+            .await
+        {
+            tracing::debug!(error = %e, "FTS index creation skipped (may already exist)");
+        } else {
+            tracing::info!("FTS index created on restatement column");
+        }
+        self.fts_indexed.store(true, Ordering::Relaxed);
     }
 
     fn batch_to_entries(batch: &RecordBatch) -> Vec<MemoryEntry> {
@@ -123,6 +194,8 @@ impl VectorStore {
         let persons_col = get_str("persons_text");
         let entities_col = get_str("entities_text");
         let topic_col = get_str("topic");
+        let user_id_col = get_str("user_id");
+        let session_id_col = get_str("session_id");
 
         for i in 0..n {
             let id_str = id_col.map(|c| c.value(i)).unwrap_or_default();
@@ -162,6 +235,18 @@ impl VectorStore {
                 .filter(|s| !s.is_empty())
                 .map(String::from);
 
+            let user_id = user_id_col
+                .filter(|c| !c.is_null(i))
+                .map(|c| c.value(i))
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
+            let session_id = session_id_col
+                .filter(|c| !c.is_null(i))
+                .map(|c| c.value(i))
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
             let id = uuid::Uuid::parse_str(id_str).unwrap_or_else(|_| uuid::Uuid::new_v4());
 
             entries.push(MemoryEntry {
@@ -173,6 +258,8 @@ impl VectorStore {
                 persons,
                 entities: entity_list,
                 topic,
+                user_id,
+                session_id,
             });
         }
         entries
@@ -236,6 +323,18 @@ impl VectorStore {
                 .map(|e| e.topic.clone().unwrap_or_default())
                 .collect::<Vec<_>>(),
         ));
+        let user_ids: ArrayRef = Arc::new(StringArray::from(
+            entries
+                .iter()
+                .map(|e| e.user_id.clone().unwrap_or_default())
+                .collect::<Vec<_>>(),
+        ));
+        let session_ids: ArrayRef = Arc::new(StringArray::from(
+            entries
+                .iter()
+                .map(|e| e.session_id.clone().unwrap_or_default())
+                .collect::<Vec<_>>(),
+        ));
 
         let dim = self.dimension;
         let flat: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
@@ -258,6 +357,8 @@ impl VectorStore {
                 persons_text,
                 entities_text,
                 topics,
+                user_ids,
+                session_ids,
                 vector_array,
             ],
         )
@@ -278,20 +379,8 @@ impl VectorStore {
             .await
             .map_err(|e| Error::VectorStore(format!("add entries failed: {e}")))?;
 
-        // Create FTS index after first data insertion.
         if was_empty {
-            if let Err(e) = table
-                .create_index(
-                    &["restatement"],
-                    lancedb::index::Index::FTS(lancedb::index::scalar::FtsIndexBuilder::default()),
-                )
-                .execute()
-                .await
-            {
-                tracing::warn!(error = %e, "FTS index creation skipped");
-            } else {
-                tracing::info!("FTS index created on restatement column");
-            }
+            self.ensure_fts_index(&table).await;
         }
 
         tracing::info!(count = n, "added memory entries");
@@ -307,6 +396,7 @@ impl VectorStore {
         &self,
         query_vec: &[f32],
         top_k: usize,
+        scope: &Scope,
     ) -> Result<Vec<MemoryEntry>> {
         let table = self.get_table().await?;
         if table
@@ -318,11 +408,15 @@ impl VectorStore {
             return Ok(Vec::new());
         }
 
-        let results = table
+        let mut q = table
             .query()
             .nearest_to(query_vec)
-            .map_err(|e| Error::VectorStore(format!("nearest_to failed: {e}")))?
-            .limit(top_k)
+            .map_err(|e| Error::VectorStore(format!("nearest_to failed: {e}")))?;
+        q = q.limit(top_k);
+        if let Some(clause) = scope.to_where_clause() {
+            q = q.only_if(clause);
+        }
+        let results = q
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("vector search failed: {e}")))?;
@@ -344,6 +438,7 @@ impl VectorStore {
         &self,
         keywords: &[String],
         top_k: usize,
+        scope: &Scope,
     ) -> Result<Vec<MemoryEntry>> {
         if keywords.is_empty() {
             return Ok(Vec::new());
@@ -359,9 +454,12 @@ impl VectorStore {
             return Ok(Vec::new());
         }
 
+        let scope_clause = scope.to_where_clause();
         let fts_query = keywords.join(" ");
 
         // Try FTS first (uses Tantivy index on restatement column).
+        // Note: FTS + scope filter may not combine well in all LanceDB versions;
+        // on failure we fall back to LIKE which supports scope natively.
         match table
             .query()
             .full_text_search(lancedb::index::scalar::FullTextSearchQuery::new(
@@ -376,7 +474,13 @@ impl VectorStore {
                     .try_collect()
                     .await
                     .map_err(|e| Error::VectorStore(format!("FTS collect failed: {e}")))?;
-                return Ok(batches.iter().flat_map(Self::batch_to_entries).collect());
+                let mut entries: Vec<MemoryEntry> =
+                    batches.iter().flat_map(Self::batch_to_entries).collect();
+                if let Some(clause) = &scope_clause {
+                    entries.retain(|e| scope_matches(e, scope));
+                    let _ = clause;
+                }
+                return Ok(entries);
             }
             Err(e) => {
                 tracing::debug!(error = %e, "FTS search unavailable, falling back to LIKE");
@@ -391,7 +495,10 @@ impl VectorStore {
                 format!("(restatement LIKE '%{safe}%' OR keywords_text LIKE '%{safe}%')")
             })
             .collect();
-        let where_clause = conditions.join(" OR ");
+        let mut where_clause = format!("({})", conditions.join(" OR "));
+        if let Some(sc) = &scope_clause {
+            where_clause = format!("{where_clause} AND {sc}");
+        }
 
         let results = table
             .query()
@@ -418,6 +525,7 @@ impl VectorStore {
         &self,
         filter: &MetadataFilter,
         top_k: usize,
+        scope: &Scope,
     ) -> Result<Vec<MemoryEntry>> {
         if filter.is_empty() {
             return Ok(Vec::new());
@@ -471,7 +579,10 @@ impl VectorStore {
             return Ok(Vec::new());
         }
 
-        let where_clause = conditions.join(" AND ");
+        let mut where_clause = conditions.join(" AND ");
+        if let Some(sc) = scope.to_where_clause() {
+            where_clause = format!("{where_clause} AND {sc}");
+        }
 
         let results = table
             .query()
@@ -494,10 +605,13 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the read operation fails.
-    pub async fn get_all(&self) -> Result<Vec<MemoryEntry>> {
+    pub async fn get_all(&self, scope: &Scope) -> Result<Vec<MemoryEntry>> {
         let table = self.get_table().await?;
-        let results = table
-            .query()
+        let mut q = table.query();
+        if let Some(clause) = scope.to_where_clause() {
+            q = q.only_if(clause);
+        }
+        let results = q
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("get all failed: {e}")))?;
@@ -548,10 +662,15 @@ impl VectorStore {
         if entry_ids.is_empty() {
             return Ok(0);
         }
+        for id in entry_ids {
+            if !is_valid_uuid(id) {
+                return Err(Error::VectorStore(format!("invalid entry id: {id}")));
+            }
+        }
         let table = self.get_table().await?;
         let ids_csv: String = entry_ids
             .iter()
-            .map(|id| format!("'{}'", id.replace('\'', "''")))
+            .map(|id| format!("'{id}'"))
             .collect::<Vec<_>>()
             .join(", ");
         let predicate = format!("entry_id IN ({ids_csv})");
@@ -569,10 +688,11 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the count operation fails.
-    pub async fn count(&self) -> Result<usize> {
+    pub async fn count(&self, scope: &Scope) -> Result<usize> {
         let table = self.get_table().await?;
+        let filter = scope.to_where_clause();
         table
-            .count_rows(None)
+            .count_rows(filter)
             .await
             .map_err(|e| Error::VectorStore(format!("count failed: {e}")))
     }
@@ -583,6 +703,7 @@ impl VectorStore {
     ///
     /// Returns an error if the table cannot be dropped or recreated.
     pub async fn clear(&self) -> Result<()> {
+        self.invalidate_cache().await;
         self.db
             .drop_table(&self.table_name, &[])
             .await
@@ -688,6 +809,20 @@ pub struct ConsolidationStats {
     pub duration_secs: f64,
 }
 
+fn scope_matches(entry: &MemoryEntry, scope: &Scope) -> bool {
+    if let Some(uid) = &scope.user_id
+        && entry.user_id.as_deref() != Some(uid.as_str())
+    {
+        return false;
+    }
+    if let Some(sid) = &scope.session_id
+        && entry.session_id.as_deref() != Some(sid.as_str())
+    {
+        return false;
+    }
+    true
+}
+
 fn split_delimited(s: &str) -> Vec<String> {
     if s.is_empty() {
         Vec::new()
@@ -704,9 +839,14 @@ fn join_delimited(items: &[String]) -> String {
 }
 
 fn escape_like(s: &str) -> String {
-    s.replace('\'', "''")
+    s.replace('\\', "\\\\")
+        .replace('\'', "''")
         .replace('%', "\\%")
         .replace('_', "\\_")
+}
+
+fn is_valid_uuid(s: &str) -> bool {
+    uuid::Uuid::parse_str(s).is_ok()
 }
 
 fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
@@ -838,8 +978,8 @@ mod tests {
     fn cosine_similarity_zero_vector() {
         let a = vec![0.0, 0.0];
         let b = vec![1.0, 2.0];
-        assert_eq!(cosine_similarity(&a, &b), 0.0);
-        assert_eq!(cosine_similarity(&b, &a), 0.0);
+        assert!((cosine_similarity(&a, &b) - 0.0).abs() < 1e-9);
+        assert!((cosine_similarity(&b, &a) - 0.0).abs() < 1e-9);
     }
 
     #[test]
@@ -852,5 +992,83 @@ mod tests {
         let expected = dot / (mag_a * mag_b);
         let sim = cosine_similarity(&a, &b);
         assert!((sim - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn escape_like_backslash() {
+        assert_eq!(escape_like(r"a\b"), r"a\\b");
+        assert_eq!(escape_like(r"c:\path"), r"c:\\path");
+    }
+
+    #[test]
+    fn is_valid_uuid_valid() {
+        let id = uuid::Uuid::new_v4().to_string();
+        assert!(is_valid_uuid(&id));
+    }
+
+    #[test]
+    fn is_valid_uuid_invalid() {
+        assert!(!is_valid_uuid("not-a-uuid"));
+        assert!(!is_valid_uuid(""));
+        assert!(!is_valid_uuid("'; DROP TABLE --"));
+    }
+
+    #[test]
+    fn scope_empty_no_clause() {
+        let s = Scope::default();
+        assert!(s.to_where_clause().is_none());
+    }
+
+    #[test]
+    fn scope_user_only() {
+        let s = Scope {
+            user_id: Some("alice".into()),
+            session_id: None,
+        };
+        let clause = s.to_where_clause().unwrap();
+        assert!(clause.contains("user_id"));
+        assert!(clause.contains("alice"));
+        assert!(!clause.contains("session_id"));
+    }
+
+    #[test]
+    fn scope_both() {
+        let s = Scope {
+            user_id: Some("bob".into()),
+            session_id: Some("s1".into()),
+        };
+        let clause = s.to_where_clause().unwrap();
+        assert!(clause.contains("user_id"));
+        assert!(clause.contains("session_id"));
+        assert!(clause.contains("AND"));
+    }
+
+    #[test]
+    fn scope_matches_no_scope() {
+        let e = MemoryEntry::new("test");
+        let s = Scope::default();
+        assert!(scope_matches(&e, &s));
+    }
+
+    #[test]
+    fn scope_matches_user_hit() {
+        let mut e = MemoryEntry::new("test");
+        e.user_id = Some("alice".into());
+        let s = Scope {
+            user_id: Some("alice".into()),
+            session_id: None,
+        };
+        assert!(scope_matches(&e, &s));
+    }
+
+    #[test]
+    fn scope_matches_user_miss() {
+        let mut e = MemoryEntry::new("test");
+        e.user_id = Some("bob".into());
+        let s = Scope {
+            user_id: Some("alice".into()),
+            session_id: None,
+        };
+        assert!(!scope_matches(&e, &s));
     }
 }
