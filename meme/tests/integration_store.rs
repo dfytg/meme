@@ -248,7 +248,8 @@ async fn get_all_with_vectors_roundtrip() {
         .await
         .unwrap();
 
-    let pairs = store.get_all_with_vectors().await.unwrap();
+    let scope = Scope::default();
+    let pairs = store.get_all_with_vectors(&scope).await.unwrap();
     assert_eq!(pairs.len(), 1);
     assert_eq!(pairs[0].0.restatement, "roundtrip");
     for (a, b) in pairs[0].1.iter().zip(v.iter()) {

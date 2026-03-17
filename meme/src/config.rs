@@ -186,6 +186,8 @@ impl Default for EmbeddingConfig {
 pub struct StoreConfig {
     /// Path to `LanceDB` storage directory.
     pub lancedb_path: String,
+    /// Path to the `SQLite` history database file.
+    pub history_db_path: String,
     /// Memory table name.
     pub table_name: String,
 }
@@ -195,6 +197,7 @@ impl Default for StoreConfig {
         let base = default_data_dir();
         Self {
             lancedb_path: base.join("lancedb").to_string_lossy().into_owned(),
+            history_db_path: base.join("history.db").to_string_lossy().into_owned(),
             table_name: "memories".to_owned(),
         }
     }

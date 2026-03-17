@@ -157,15 +157,13 @@ impl VectorStore {
 
     /// Rebuild the FTS index to include all current data.
     ///
-    /// LanceDB FTS is snapshot-based — new rows are invisible to keyword search
+    /// `LanceDB` FTS is snapshot-based — new rows are invisible to keyword search
     /// until the index is recreated.
     async fn rebuild_fts_index(&self, table: &lancedb::Table) {
         if let Err(e) = table
             .create_index(
                 &["restatement"],
-                lancedb::index::Index::FTS(
-                    lancedb::index::scalar::FtsIndexBuilder::default(),
-                ),
+                lancedb::index::Index::FTS(lancedb::index::scalar::FtsIndexBuilder::default()),
             )
             .execute()
             .await
@@ -631,15 +629,21 @@ impl VectorStore {
         Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
     }
 
-    /// Retrieve all entries together with their embedding vectors.
+    /// Retrieve all entries together with their embedding vectors, filtered by scope.
     ///
     /// # Errors
     ///
     /// Returns an error if the read operation fails.
-    pub async fn get_all_with_vectors(&self) -> Result<Vec<(MemoryEntry, Vec<f32>)>> {
+    pub async fn get_all_with_vectors(
+        &self,
+        scope: &Scope,
+    ) -> Result<Vec<(MemoryEntry, Vec<f32>)>> {
         let table = self.get_table().await?;
-        let results = table
-            .query()
+        let mut q = table.query();
+        if let Some(clause) = scope.to_where_clause() {
+            q = q.only_if(clause);
+        }
+        let results = q
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("get all with vectors failed: {e}")))?;
@@ -790,7 +794,7 @@ impl VectorStore {
         min_importance: f64,
         scope: &Scope,
     ) -> Result<ConsolidationStats> {
-        let pairs = self.get_all_with_vectors().await?;
+        let pairs = self.get_all_with_vectors(scope).await?;
         if pairs.is_empty() {
             return Ok(ConsolidationStats::default());
         }

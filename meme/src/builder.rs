@@ -133,11 +133,8 @@ impl MemeBuilder {
             .await?,
         );
 
-        let history_path = std::path::Path::new(&config.store.lancedb_path)
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("history.db");
-        let history = Arc::new(HistoryStore::open(&history_path)?);
+        let history_path = std::path::Path::new(&config.store.history_db_path);
+        let history = Arc::new(HistoryStore::open(history_path)?);
 
         if self.clear_db {
             store.clear_all().await?;

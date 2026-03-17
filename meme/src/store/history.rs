@@ -171,7 +171,7 @@ impl EventType {
         }
     }
 
-    fn from_str(s: &str) -> Self {
+    fn parse_db(s: &str) -> Self {
         match s {
             "update" => Self::Update,
             "delete" => Self::Delete,
@@ -195,7 +195,7 @@ impl RawEvent {
         MemoryEvent {
             id: Uuid::parse_str(&self.event_id).unwrap_or_else(|_| Uuid::new_v4()),
             memory_id: Uuid::parse_str(&self.memory_id).unwrap_or_else(|_| Uuid::new_v4()),
-            event_type: EventType::from_str(&self.event_type),
+            event_type: EventType::parse_db(&self.event_type),
             old_content: self.old_content,
             new_content: self.new_content,
             timestamp: chrono::DateTime::parse_from_rfc3339(&self.created_at)
