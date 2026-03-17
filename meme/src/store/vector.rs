@@ -106,7 +106,6 @@ impl VectorStore {
     }
 
     fn batch_to_entries(&self, batch: &RecordBatch) -> Vec<MemoryEntry> {
-        let _ = &self;
         let n = batch.num_rows();
         let mut entries = Vec::with_capacity(n);
 

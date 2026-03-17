@@ -91,6 +91,7 @@ impl ApiEmbedding {
         let body = serde_json::json!({
             "model": self.model,
             "input": input,
+            "dimensions": self.dimension,
         });
 
         let resp = self

@@ -11,16 +11,16 @@
 [rust-badge]: https://img.shields.io/badge/rust-edition%202024-orange.svg
 [rust-url]: https://doc.rust-lang.org/edition-guide/
 
-**High-performance long-term memory for AI agents — three-stage pipeline with semantic compression, hybrid retrieval, and cross-session persistence, written in Rust.**
+**High-performance long-term memory for AI agents — three-stage pipeline with semantic compression, hybrid retrieval, and persistent vector storage, written in Rust.**
 
-meme implements the [SimpleMem](3rdparty/SimpleMem/) three-stage memory pipeline with a production-grade Rust core: (1) **Semantic Structured Compression** extracts lossless, disambiguated memory entries from dialogues via LLM, (2) **Online Semantic Synthesis** deduplicates at write time, and (3) **Intent-Aware Retrieval Planning** combines semantic, lexical (FTS), and structured metadata search with LLM-driven reflection. A full cross-session system persists memory across independent conversations.
+meme implements the [SimpleMem](3rdparty/SimpleMem/) three-stage memory pipeline with a production-grade Rust core: (1) **Semantic Structured Compression** extracts lossless, disambiguated memory entries from dialogues via LLM, (2) **Online Semantic Synthesis** deduplicates at write time, and (3) **Intent-Aware Retrieval Planning** combines semantic, lexical (FTS), and structured metadata search with LLM-driven reflection. Memory is stored persistently on disk via LanceDB.
 
 ## Crates
 
 | Crate | | Description |
 | --- | --- | --- |
-| **[`meme`](meme/)** | [![crates.io][meme-crate]][meme-crate-url] [![docs.rs][meme-doc]][meme-doc-url] | Core library — pipeline, vector store, cross-session orchestrator |
-| **[`meme-cli`](meme-cli/)** | [![crates.io][cli-crate]][cli-crate-url] | CLI tool — add dialogues, ask questions, manage sessions |
+| **[`meme`](meme/)** | [![crates.io][meme-crate]][meme-crate-url] [![docs.rs][meme-doc]][meme-doc-url] | Core library — pipeline, vector store, embedding, LLM client |
+| **[`meme-cli`](meme-cli/)** | [![crates.io][cli-crate]][cli-crate-url] | CLI tool — add dialogues, ask questions, export memories |
 
 [meme-crate]: https://img.shields.io/crates/v/meme.svg
 [meme-crate-url]: https://crates.io/crates/meme
@@ -65,14 +65,6 @@ meme ask "Where will Alice and Bob meet?"
 meme list
 meme list --json
 
-# Cross-session memory
-meme session start conv-001 -m "Refactor the auth module"
-meme session stop <session-id>
-meme session list
-
-# Memory consolidation (decay/merge/prune)
-meme consolidate
-
 # Export / import
 meme export -o memories.json
 ```
@@ -97,7 +89,7 @@ meme.finalize().await?;
 let answer = meme.ask("When will Alice meet?").await?;
 ```
 
-See [`examples/`](meme/examples/) for more: [basic](meme/examples/basic.rs), [cross-session](meme/examples/cross_session.rs), [batch import](meme/examples/batch_import.rs).
+See [`examples/`](meme/examples/) for more: [basic](meme/examples/basic.rs), [batch import](meme/examples/batch_import.rs).
 
 ## Architecture
 
@@ -117,8 +109,7 @@ Query ──► HybridRetriever ────────►├─ Keyword search
 ```
 
 - **`meme`** — Core library. `Meme` facade wraps the three-stage pipeline behind `add_dialogue()` / `ask()`. `VectorStore` uses LanceDB for embedded vector + FTS indexing. `Embedder` supports API and local ONNX backends via enum dispatch (zero-cost). `LlmClient` is an OpenAI-compatible HTTP client with retry + exponential backoff.
-- **`meme-cli`** — Interactive CLI. TOML + env var configuration, JSONL import, table/JSON output, cross-session management.
-- **Cross-session** — `CrossOrchestrator` manages session lifecycle (start → record events → stop → extract observations → inject context). SQLite stores sessions, events, observations, and summaries. Context injection fills a token-budgeted bundle at session start.
+- **`meme-cli`** — Interactive CLI. TOML + env var configuration, JSONL import, table/JSON output.
 
 ## Three-Stage Pipeline
 

@@ -269,10 +269,38 @@ impl MemeBuilder {
         // Build components.
         let llm = Arc::new(LlmClient::from_config(&config.llm)?);
 
-        let embedder = Arc::new(Embedder::Api(ApiEmbedding::from_config(
-            &config.embedding,
-            &config.llm,
-        )?));
+        let embedder = Arc::new(match config.embedding.provider {
+            config::EmbeddingProviderKind::Api => {
+                Embedder::Api(ApiEmbedding::from_config(&config.embedding, &config.llm)?)
+            }
+            #[cfg(feature = "onnx")]
+            config::EmbeddingProviderKind::Onnx => {
+                let model_path = config.embedding.onnx_model_path.as_deref().ok_or_else(|| {
+                    error::Error::Config("onnx_model_path is required for ONNX provider".into())
+                })?;
+                let tokenizer_path =
+                    config
+                        .embedding
+                        .onnx_tokenizer_path
+                        .as_deref()
+                        .ok_or_else(|| {
+                            error::Error::Config(
+                                "onnx_tokenizer_path is required for ONNX provider".into(),
+                            )
+                        })?;
+                Embedder::Onnx(embedding::OnnxEmbedding::from_paths(
+                    model_path,
+                    tokenizer_path,
+                    config.embedding.dimension,
+                )?)
+            }
+            #[cfg(not(feature = "onnx"))]
+            config::EmbeddingProviderKind::Onnx => {
+                return Err(error::Error::Config(
+                    "ONNX provider requires the 'onnx' feature flag".into(),
+                ));
+            }
+        });
 
         let store = Arc::new(
             VectorStore::open(
