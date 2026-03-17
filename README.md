@@ -93,65 +93,144 @@ See [`examples/`](meme/examples/) for more: [basic](meme/examples/basic.rs), [ba
 
 ## Feature Flags
 
-| Feature | Description |
-| --- | --- |
-| `api-embedding` | Remote API-based embedding (enabled by default) |
-| `onnx` | Local ONNX Runtime embedding via `ort` + `tokenizers` |
+| Feature | Default | Description |
+| --- | --- | --- |
+| `api-embedding` | **yes** | Remote OpenAI-compatible embedding API |
+| `onnx` | no | Local ONNX embedding via [`fastembed`](https://github.com/Anush008/fastembed-rs) — auto-downloads models from Hugging Face Hub |
 
 ## Configuration
 
-Configuration is loaded from `~/.meme/config.toml` with environment variable overrides:
+**No configuration file is required.** The library is configured entirely through `MemeBuilder`:
 
-| Env Var | Description |
-| --- | --- |
-| `MEME_LLM_API_KEY` | OpenAI-compatible API key |
-| `MEME_LLM_BASE_URL` | API base URL |
-| `MEME_LLM_MODEL` | Model name (default: `gpt-4.1-mini`) |
-| `MEME_EMBEDDING_PROVIDER` | `api` or `onnx` |
+```rust
+let meme = MemeBuilder::new()
+    .api_key("sk-...")
+    .model("gpt-4.1-mini")
+    .base_url("https://api.openai.com/v1")
+    .build()
+    .await?;
+```
+
+For full control, pass a `Config` struct directly:
+
+```rust
+use meme::config::{Config, LlmConfig, EmbeddingConfig, StoreConfig, PipelineConfig};
+
+let config = Config {
+    llm: LlmConfig { api_key: Some("sk-...".into()), ..Default::default() },
+    embedding: EmbeddingConfig { model: "text-embedding-3-small".into(), dimension: 1024, ..Default::default() },
+    store: StoreConfig { lancedb_path: "/custom/path/lancedb".into(), ..Default::default() },
+    pipeline: PipelineConfig { semantic_top_k: 25, enable_reflection: true, ..Default::default() },
+};
+
+let meme = MemeBuilder::new().config(config).build().await?;
+```
+
+The CLI tool (`meme-cli`) optionally reads `~/.meme/config.toml`. Environment variables override any file or default values:
+
+| Env Var | Overrides | Default |
+| --- | --- | --- |
+| `MEME_LLM_API_KEY` | `llm.api_key` | *(required)* |
+| `MEME_LLM_BASE_URL` | `llm.base_url` | `https://api.openai.com/v1` |
+| `MEME_LLM_MODEL` | `llm.model` | `gpt-4.1-mini` |
+| `MEME_EMBEDDING_PROVIDER` | `embedding.provider` | `api` |
+
+<details>
+<summary><b>Full config.toml reference</b></summary>
+
+```toml
+[llm]
+api_key = "sk-..."
+base_url = "https://api.openai.com/v1"
+model = "gpt-4.1-mini"
+temperature = 0.1
+max_retries = 3
+
+[embedding]
+provider = "api"                        # "api" or "onnx"
+model = "text-embedding-3-small"        # API model name or fastembed model code
+dimension = 1024                        # vector dimension (auto-detected for onnx)
+
+[store]
+lancedb_path = "~/.meme/lancedb"
+table_name = "memories"
+
+[pipeline]
+window_size = 40                        # dialogues per extraction window
+overlap_size = 2                        # overlap between consecutive windows
+semantic_top_k = 25                     # max semantic search results
+keyword_top_k = 5                       # max keyword search results
+structured_top_k = 5                    # max structured search results
+enable_planning = true                  # LLM-driven query analysis
+enable_reflection = true                # iterative completeness checking
+max_reflection_rounds = 2
+max_build_workers = 16                  # parallel extraction workers
+max_retrieval_workers = 8               # parallel search workers
+```
+
+</details>
 
 ## Architecture
 
-```text
-Dialogues ──► MemoryBuilder ──► VectorStore (LanceDB)
-               (Stage 1+2)         │
-                                   ├─ Semantic search (dense vectors)
-Query ──► HybridRetriever ────────►├─ Keyword search (FTS / Tantivy)
-           (Stage 3)               ├─ Structured search (metadata filters)
-               │                   │
-               ▼                   │
-          LLM Planning ◄───────────┘
-           + Reflection
-               │
-               ▼
-          Answer Generation
+```mermaid
+flowchart TB
+    subgraph Write["Write Path (Stage 1 + 2)"]
+        D[Dialogues] --> W[Windowing]
+        W --> LLM1["LLM Extraction<br/><i>Semantic Structured Compression</i>"]
+        LLM1 --> E[MemoryEntry]
+        E --> EMB1[Embedding]
+        EMB1 --> VS[(VectorStore<br/>LanceDB)]
+    end
+
+    subgraph Read["Read Path (Stage 3)"]
+        Q[Query] --> P["LLM Planning<br/><i>Intent-Aware Retrieval</i>"]
+        P --> S1[Semantic Search<br/>dense vectors]
+        P --> S2[Keyword Search<br/>FTS / Tantivy]
+        P --> S3[Structured Search<br/>metadata filters]
+        S1 & S2 & S3 --> M[Merge + Deduplicate]
+        M --> R{Reflection}
+        R -->|incomplete| P
+        R -->|complete| G["LLM Answer Generation"]
+    end
+
+    VS -.-> S1 & S2 & S3
 ```
 
-- **`meme`** — Core library. `Meme` facade wraps the three-stage pipeline behind `add_dialogue()` / `ask()`. `VectorStore` uses LanceDB for embedded vector + FTS indexing. `Embedder` supports API and local ONNX backends via enum dispatch (zero-cost). `LlmClient` is an OpenAI-compatible HTTP client with retry + exponential backoff.
-- **`meme-cli`** — Interactive CLI. TOML + env var configuration, JSONL import, table/JSON output.
+Each `MemoryEntry` is a self-contained, unambiguous unit of knowledge stored with three index layers:
+
+| Index Layer | Type | Purpose | Implementation |
+| --- | --- | --- | --- |
+| **Semantic** | Dense vector | Conceptual similarity | 1024-d embeddings via OpenAI or local ONNX |
+| **Lexical** | Inverted index | Exact term matching | FTS (Tantivy) + BM25-style keywords |
+| **Symbolic** | Structured metadata | Filtered lookup | Timestamp, location, persons, entities, topic |
 
 ## Three-Stage Pipeline
 
 ### Stage 1: Semantic Structured Compression
 
-Dialogues are windowed and sent to an LLM to extract **atomic, self-contained memory entries**. Each entry contains:
+Raw dialogues are split into overlapping windows and sent to an LLM. The LLM extracts **atomic, self-contained memory entries** — each entry is a complete, independent fact with all pronouns resolved and all timestamps converted to absolute ISO 8601 format. This ensures every entry can be retrieved and understood without surrounding context.
 
-- **Lossless restatement** — complete sentence with no pronouns, no relative time
-- **Keywords** — for BM25-style lexical matching
-- **Structured metadata** — timestamp, location, persons, entities, topic
+Each entry contains:
+
+- **Lossless restatement** — complete sentence (no pronouns, no relative time)
+- **Keywords** — core terms for BM25-style lexical matching
+- **Structured metadata** — ISO 8601 timestamp, location, person names, entity names, topic phrase
 
 ### Stage 2: Online Semantic Synthesis
 
-Previous-window entries are passed as context during extraction to avoid duplicating information across overlapping windows.
+During extraction, the previous window's entries are passed as context to the LLM. This prevents duplicating information across overlapping windows — the LLM can see what was already captured and focuses on new facts. Unlike offline consolidation systems that run as background jobs, this synthesis happens inline during the write path with zero additional latency.
 
 ### Stage 3: Intent-Aware Retrieval Planning
 
-A single LLM call analyzes the query to produce a **unified plan** containing:
+A single LLM call analyzes the user's query and produces a **unified retrieval plan**:
 
-- Extracted keywords, persons, entities, time expressions
-- Targeted search queries for semantic retrieval
-- Required information types for completeness assessment
+1. **Query analysis** — extract keywords, person names, entities, time expressions, and question type
+2. **Search planning** — generate 1–3 targeted search queries for semantic retrieval
+3. **Information requirements** — identify what specific facts are needed for a complete answer
 
-The plan drives parallel execution of three search views (semantic, keyword, structured), followed by optional **reflection** rounds that assess completeness and issue additional targeted queries.
+The plan drives **parallel execution** of all three search layers (semantic, keyword, structured). Results are merged via ID-based deduplication.
+
+When reflection is enabled, the system iteratively assesses completeness: if retrieved context is insufficient, additional targeted queries are generated and executed until the information requirement is satisfied or the max reflection rounds are reached.
 
 ## License
 
