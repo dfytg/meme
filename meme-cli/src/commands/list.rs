@@ -39,10 +39,7 @@ impl ListCmd {
         }
         let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
-        let entries = meme
-            .get_all_memories()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let entries = meme.get_all().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let total = entries.len();
 

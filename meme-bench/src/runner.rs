@@ -213,10 +213,7 @@ impl RunCmd {
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         meme.finalize().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
-        let stored = meme
-            .memory_count()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let stored = meme.count().await.map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("  Stored {stored} memory entries");
 
         let mut results = Vec::new();

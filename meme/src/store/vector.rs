@@ -671,6 +671,41 @@ impl VectorStore {
         Ok(pairs)
     }
 
+    /// Retrieve a single entry by its UUID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub async fn get_by_id(&self, id: uuid::Uuid) -> Result<Option<MemoryEntry>> {
+        let table = self.get_table().await?;
+        let filter = format!("entry_id = '{id}'");
+        let results = table
+            .query()
+            .only_if(filter)
+            .limit(1)
+            .execute()
+            .await
+            .map_err(|e| Error::VectorStore(format!("get_by_id failed: {e}")))?;
+
+        let batches: Vec<RecordBatch> = results
+            .try_collect()
+            .await
+            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
+
+        Ok(batches.iter().flat_map(Self::batch_to_entries).next())
+    }
+
+    /// Replace an existing entry (delete + re-insert with same ID).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete or insert fails.
+    pub async fn update_entry(&self, entry: &MemoryEntry, vector: &[f32]) -> Result<()> {
+        self.delete_entries(&[entry.id.to_string()]).await?;
+        self.add_entries(std::slice::from_ref(entry), &[vector.to_vec()])
+            .await
+    }
+
     /// Delete entries by their IDs.
     ///
     /// # Errors

@@ -34,10 +34,7 @@ impl ExportCmd {
         }
         let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
-        let entries = meme
-            .get_all_memories()
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let entries = meme.get_all().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let json = serde_json::to_string_pretty(&entries)?;
 

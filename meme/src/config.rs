@@ -201,7 +201,7 @@ impl Default for StoreConfig {
 }
 
 /// Pipeline parameters.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PipelineConfig {
     /// Number of dialogues per processing window.
@@ -224,6 +224,12 @@ pub struct PipelineConfig {
     pub max_build_workers: usize,
     /// Max concurrent workers for retrieval queries.
     pub max_retrieval_workers: usize,
+    /// Custom extraction prompt (replaces the built-in extraction prompt).
+    pub custom_extraction_prompt: Option<String>,
+    /// Custom answer generation prompt (replaces the built-in answer prompt).
+    pub custom_answer_prompt: Option<String>,
+    /// Enable LLM-based reranking of search results.
+    pub enable_rerank: bool,
 }
 
 impl Default for PipelineConfig {
@@ -239,6 +245,9 @@ impl Default for PipelineConfig {
             max_reflection_rounds: 2,
             max_build_workers: 16,
             max_retrieval_workers: 8,
+            custom_extraction_prompt: None,
+            custom_answer_prompt: None,
+            enable_rerank: false,
         }
     }
 }

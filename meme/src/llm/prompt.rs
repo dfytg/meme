@@ -191,38 +191,76 @@ Now answer the question. Return ONLY the JSON, no other text."#
     )
 }
 
-/// Build the memory conflict resolution prompt.
+/// Build the memory reconciliation prompt.
 ///
-/// Given a new memory entry and a set of existing similar entries,
-/// determine which action to take for each pair.
+/// Given new extracted facts and existing similar memories, the LLM determines
+/// the correct lifecycle action (ADD / UPDATE / DELETE / NOOP) for each new fact.
 #[must_use]
-pub fn conflict_resolution(new_entry: &str, existing_entries: &[(usize, &str)]) -> String {
+pub fn reconcile(new_facts: &[&str], existing_memories: &[(usize, &str)]) -> String {
+    let mut new_block = String::new();
+    for (i, fact) in new_facts.iter().enumerate() {
+        let _ = writeln!(new_block, "[New {i}] {fact}");
+    }
     let mut existing_block = String::new();
-    for (idx, text) in existing_entries {
+    for (idx, text) in existing_memories {
         let _ = writeln!(existing_block, "[Existing {idx}] {text}");
     }
     format!(
-        r#"You are a memory conflict resolution assistant. A new memory is being stored, and similar existing memories were found. Determine the correct action for each existing memory.
+        r#"You are a smart memory manager. Compare newly extracted facts with existing memories and decide the correct action for each new fact.
 
-[New Memory]
-{new_entry}
-
-[Existing Similar Memories]
+[New Facts]
+{new_block}
+[Existing Memories]
 {existing_block}
-For each existing memory, decide:
-- "keep_both": The memories contain genuinely different information, both should be kept.
-- "update": The new memory supersedes/updates the existing one (e.g., changed plans, corrected facts). The existing one should be deleted.
-- "duplicate": The new memory is essentially the same as the existing one. The new memory should be skipped (not stored).
+For each new fact, choose ONE action:
+- "add": New information not present in existing memories. Keep it.
+- "update": Supersedes or corrects an existing memory. Specify which existing_index to replace.
+- "delete": Contradicts an existing memory, making it obsolete. Specify which existing_index to remove.
+- "noop": Already present in existing memories (duplicate). Skip it.
 
-Return a JSON object with a "decisions" array, one decision per existing memory:
+Guidelines:
+1. If new fact updates an existing memory with more recent/accurate info, use "update".
+2. If new fact directly contradicts an existing memory, use "delete" on the old one AND "add" the new.
+3. If new fact conveys the same meaning as an existing one, use "noop".
+4. If new fact is genuinely new information, use "add".
+
+Return a JSON object:
 ```json
 {{
-  "decisions": [
-    {{"existing_index": 0, "action": "keep_both|update|duplicate", "reason": "brief explanation"}}
+  "actions": [
+    {{"new_index": 0, "action": "add|update|delete|noop", "existing_index": null, "reason": "brief explanation"}}
   ]
 }}
 ```
 
+Return ONLY the JSON object."#
+    )
+}
+
+/// Build an LLM-based reranking prompt.
+///
+/// Given a query and candidate results, the LLM ranks them by relevance.
+#[must_use]
+pub fn rerank(query: &str, candidates: &[(usize, &str)]) -> String {
+    let mut block = String::new();
+    for (idx, text) in candidates {
+        let _ = writeln!(block, "[{idx}] {text}");
+    }
+    format!(
+        r#"Rank the following memory entries by relevance to the query. Return the indices in order from most to least relevant.
+
+Query: {query}
+
+Candidates:
+{block}
+Return a JSON object:
+```json
+{{
+  "ranked_indices": [2, 0, 1, 3]
+}}
+```
+
+Only include indices of entries that are actually relevant. Omit irrelevant entries.
 Return ONLY the JSON object."#
     )
 }

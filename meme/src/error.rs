@@ -7,8 +7,15 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// LLM API call failed.
-    #[error("llm error: {0}")]
-    Llm(String),
+    #[error("llm error: {message}")]
+    Llm {
+        /// Human-readable error description.
+        message: String,
+        /// HTTP status code from the API, if available.
+        status: Option<u16>,
+        /// Whether this error is transient and the request can be retried.
+        retryable: bool,
+    },
 
     /// Failed to parse JSON from LLM response.
     #[error("json parse error: {0}")]
@@ -22,9 +29,25 @@ pub enum Error {
     #[error("vector store error: {0}")]
     VectorStore(String),
 
+    /// Memory entry not found.
+    #[error("not found: {id}")]
+    NotFound {
+        /// The ID that was not found.
+        id: String,
+    },
+
     /// Configuration error.
     #[error("config error: {0}")]
     Config(String),
+
+    /// Input validation error.
+    #[error("validation error: {message}")]
+    Validation {
+        /// Description of the validation failure.
+        message: String,
+        /// The field that failed validation, if applicable.
+        field: Option<String>,
+    },
 
     /// I/O error.
     #[error("io error: {0}")]
@@ -45,4 +68,41 @@ pub enum Error {
     /// Generic internal error.
     #[error("{0}")]
     Internal(String),
+}
+
+impl Error {
+    /// Create an LLM error from a status code and message.
+    pub fn llm(message: impl Into<String>) -> Self {
+        Self::Llm {
+            message: message.into(),
+            status: None,
+            retryable: false,
+        }
+    }
+
+    /// Create an LLM error with HTTP status context.
+    pub fn llm_with_status(status: u16, message: impl Into<String>) -> Self {
+        let retryable = matches!(status, 429 | 500 | 502 | 503 | 504);
+        Self::Llm {
+            message: message.into(),
+            status: Some(status),
+            retryable,
+        }
+    }
+
+    /// Create a validation error.
+    pub fn validation(message: impl Into<String>) -> Self {
+        Self::Validation {
+            message: message.into(),
+            field: None,
+        }
+    }
+
+    /// Create a validation error with field context.
+    pub fn validation_field(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Validation {
+            message: message.into(),
+            field: Some(field.into()),
+        }
+    }
 }

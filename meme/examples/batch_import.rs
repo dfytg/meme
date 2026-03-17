@@ -43,7 +43,7 @@ async fn main() -> meme::error::Result<()> {
 
     println!(
         "Imported {count} dialogues → {} memories\n",
-        meme.memory_count().await?
+        meme.count().await?
     );
 
     let answer = meme.ask("When and where is the sprint review?").await?;

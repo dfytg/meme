@@ -129,7 +129,7 @@ impl LlmClient {
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| Error::Llm("all retries exhausted".to_owned())))
+        Err(last_err.unwrap_or_else(|| Error::llm("all retries exhausted")))
     }
 
     async fn call_api(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
@@ -157,14 +157,17 @@ impl LlmClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(Error::Llm(format!("API returned {status}: {text}")));
+            return Err(Error::llm_with_status(
+                status.as_u16(),
+                format!("API returned {status}: {text}"),
+            ));
         }
 
         let data: serde_json::Value = resp.json().await?;
         data["choices"][0]["message"]["content"]
             .as_str()
             .map(String::from)
-            .ok_or_else(|| Error::Llm("missing content in API response".to_owned()))
+            .ok_or_else(|| Error::llm("missing content in API response"))
     }
 }
 

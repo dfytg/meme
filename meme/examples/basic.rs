@@ -33,7 +33,7 @@ async fn main() -> meme::error::Result<()> {
     .await?;
     meme.finalize().await?;
 
-    println!("Stored {} memories\n", meme.memory_count().await?);
+    println!("Stored {} memories\n", meme.count().await?);
 
     for q in [
         "Where will Alice and Bob meet?",
