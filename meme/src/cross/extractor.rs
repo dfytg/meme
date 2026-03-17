@@ -77,8 +77,7 @@ impl ObservationExtractor {
     pub fn events_to_dialogues(events: &[SessionEvent]) -> Vec<Dialogue> {
         events
             .iter()
-            .enumerate()
-            .filter_map(|(idx, event)| {
+            .filter_map(|event| {
                 let payload: serde_json::Value = event
                     .payload_json
                     .as_deref()
@@ -151,7 +150,7 @@ impl ObservationExtractor {
                     EventKind::System => return None,
                 };
 
-                let mut dialogue = Dialogue::new((idx + 1) as u64, speaker, content);
+                let mut dialogue = Dialogue::new(speaker, content);
                 dialogue = dialogue.with_timestamp(event.timestamp);
                 Some(dialogue)
             })

@@ -93,7 +93,7 @@ impl<'a> ContextInjector<'a> {
         if !memory_entries.is_empty() {
             let entry_tokens: usize = memory_entries
                 .iter()
-                .map(|e| estimate_tokens(&e.entry.restatement))
+                .map(|e| estimate_tokens(&e.restatement))
                 .sum();
             total_tokens += entry_tokens;
             tracing::debug!(

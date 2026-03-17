@@ -87,7 +87,7 @@ impl AddCmd {
                     .map(|dt| dt.with_timezone(&chrono::Utc))
             });
 
-            let mut d = meme::model::Dialogue::new(id, speaker, content);
+            let mut d = meme::model::Dialogue::new(speaker, content);
             if let Some(ts) = timestamp {
                 d = d.with_timestamp(ts);
             }

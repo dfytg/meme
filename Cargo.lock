@@ -3614,7 +3614,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "meme"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3635,12 +3635,13 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
 [[package]]
 name = "meme-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "chrono",

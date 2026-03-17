@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 /// A single dialogue turn from a conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dialogue {
-    /// Sequential dialogue identifier.
-    pub id: u64,
     /// Speaker name.
     pub speaker: String,
     /// Dialogue content.
@@ -19,9 +17,8 @@ pub struct Dialogue {
 impl Dialogue {
     /// Create a new dialogue turn.
     #[must_use]
-    pub fn new(id: u64, speaker: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn new(speaker: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
-            id,
             speaker: speaker.into(),
             content: content.into(),
             timestamp: None,

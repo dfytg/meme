@@ -118,7 +118,7 @@ impl ConsolidationWorker {
         let mut importance: Vec<f64> = vec![1.0; scanned];
         let mut dead: Vec<bool> = vec![false; scanned];
 
-        let decayed = self.decay(&entries, &mut importance, &mut dead);
+        let decayed = self.decay(entries, &mut importance, &mut dead);
         let (superseded, merged) = self.merge(entries, vectors, &importance, &mut dead);
         let (pruned_ids, pruned) = self.prune(entries, &importance, &dead);
 

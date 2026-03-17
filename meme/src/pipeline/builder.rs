@@ -10,8 +10,7 @@ use uuid::Uuid;
 
 use crate::config::PipelineConfig;
 use crate::error::{Error, Result};
-use crate::llm::prompt::Prompts;
-use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text};
+use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text, prompt};
 use crate::model::{Dialogue, MemoryEntry};
 
 /// Memory builder that implements Stage 1 (Semantic Structured Compression)
@@ -181,7 +180,7 @@ impl MemoryBuilder {
         );
 
         let llm = Arc::clone(&self.llm);
-        let context = Prompts::extraction_context(&self.previous_entries);
+        let context = prompt::extraction_context(&self.previous_entries);
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel_workers));
 
         let mut handles = Vec::new();
@@ -216,7 +215,7 @@ impl MemoryBuilder {
     }
 
     async fn generate_entries(&self, dialogues: &[Dialogue]) -> Result<Vec<MemoryEntry>> {
-        let context = Prompts::extraction_context(&self.previous_entries);
+        let context = prompt::extraction_context(&self.previous_entries);
         generate_entries_standalone(&self.llm, dialogues, &context).await
     }
 }
@@ -231,7 +230,7 @@ async fn generate_entries_standalone(
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n");
-    let prompt = Prompts::extraction(&dialogue_text, context);
+    let prompt = prompt::extraction(&dialogue_text, context);
 
     let messages = vec![
         Message::system(

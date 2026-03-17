@@ -1,7 +1,7 @@
 //! Three-stage memory pipeline: compression, synthesis, and retrieval.
 
 mod builder;
-mod generator;
+pub mod generator;
 mod retriever;
 
 pub use builder::MemoryBuilder;

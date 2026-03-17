@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description.workspace = true
 
+[[bin]]
+name = "meme"
+path = "src/main.rs"
+
 [dependencies]
 meme.workspace = true
 tokio.workspace = true

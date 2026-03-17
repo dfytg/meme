@@ -1,8 +1,7 @@
 //! Answer generation — synthesizes answers from retrieved memory contexts.
 
 use crate::error::Result;
-use crate::llm::prompt::Prompts;
-use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text};
+use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text, prompt};
 use crate::model::MemoryEntry;
 
 /// Generate an answer for a query given retrieved contexts.
@@ -15,8 +14,8 @@ pub async fn generate(llm: &LlmClient, query: &str, contexts: &[MemoryEntry]) ->
         return Ok("No relevant information found".to_owned());
     }
 
-    let context_str = Prompts::format_contexts(contexts);
-    let prompt = Prompts::answer(query, &context_str);
+    let context_str = prompt::format_contexts(contexts);
+    let prompt = prompt::answer(query, &context_str);
 
     let messages = vec![
         Message::system(

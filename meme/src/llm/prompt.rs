@@ -4,18 +4,13 @@ use std::fmt::Write;
 
 use crate::model::MemoryEntry;
 
-/// Collection of prompt templates used throughout the pipeline.
-#[derive(Debug, Clone, Copy)]
-pub struct Prompts;
-
-impl Prompts {
-    /// Build the extraction prompt for Stage 1 (Semantic Structured Compression).
-    ///
-    /// Converts a dialogue window into structured memory entries.
-    #[must_use]
-    pub fn extraction(dialogue_text: &str, context: &str) -> String {
-        format!(
-            r#"Your task is to extract all valuable information from the following dialogues and convert them into structured memory entries.
+/// Build the extraction prompt for Stage 1 (Semantic Structured Compression).
+///
+/// Converts a dialogue window into structured memory entries.
+#[must_use]
+pub fn extraction(dialogue_text: &str, context: &str) -> String {
+    format!(
+        r#"Your task is to extract all valuable information from the following dialogues and convert them into structured memory entries.
 
 {context}
 
@@ -52,129 +47,60 @@ Return a JSON array, each element is a memory entry:
 ```
 
 Now process the above dialogues. Return ONLY the JSON array, no other explanations."#
-        )
+    )
+}
+
+/// Build the previous-window context string for extraction.
+#[must_use]
+pub fn extraction_context(previous_entries: &[MemoryEntry]) -> String {
+    if previous_entries.is_empty() {
+        return String::new();
     }
-
-    /// Build the previous-window context string for extraction.
-    #[must_use]
-    pub fn extraction_context(previous_entries: &[MemoryEntry]) -> String {
-        if previous_entries.is_empty() {
-            return String::new();
-        }
-        let mut ctx =
-            "\n[Previous Window Memory Entries (for reference to avoid duplication)]\n".to_owned();
-        for entry in previous_entries.iter().take(3) {
-            let _ = writeln!(ctx, "- {}", entry.restatement);
-        }
-        ctx
+    let mut ctx =
+        "\n[Previous Window Memory Entries (for reference to avoid duplication)]\n".to_owned();
+    for entry in previous_entries.iter().take(3) {
+        let _ = writeln!(ctx, "- {}", entry.restatement);
     }
+    ctx
+}
 
-    /// Build the query analysis prompt (extract structured info from a user query).
-    #[must_use]
-    pub fn query_analysis(query: &str) -> String {
-        format!(
-            r#"Analyze the following query and extract key information:
+/// Build the unified query plan prompt — combines query analysis and
+/// information requirements into a single LLM call.
+#[must_use]
+pub fn query_plan(query: &str) -> String {
+    format!(
+        r#"Analyze the following question. Extract structured search metadata AND determine what information is needed to answer it.
 
-Query: {query}
+Question: {query}
 
-Please extract:
-1. keywords: List of keywords (names, places, topic words, etc.)
-2. persons: Person names mentioned
-3. time_expression: Time expression (if any)
-4. location: Location (if any)
-5. entities: Entities (companies, products, etc.)
-
-Return in JSON format:
+Return your analysis in JSON format:
 ```json
 {{
   "keywords": ["keyword1", "keyword2"],
   "persons": ["name1", "name2"],
   "time_expression": "time expression or null",
   "location": "location or null",
-  "entities": ["entity1"]
+  "entities": ["entity1"],
+  "question_type": "factual/temporal/relational/explanatory",
+  "required_info": ["what specific info is needed to answer"],
+  "search_queries": ["targeted search query 1", "targeted search query 2"]
 }}
 ```
-
-Return ONLY JSON, no other content."#
-        )
-    }
-
-    /// Build the information requirements analysis prompt (Stage 3 planning).
-    #[must_use]
-    pub fn information_requirements(query: &str) -> String {
-        format!(
-            r#"Analyze the following question and determine what specific information is required to answer it comprehensively.
-
-Question: {query}
-
-Think step by step:
-1. What type of question is this? (factual, temporal, relational, explanatory, etc.)
-2. What key entities, events, or concepts need to be identified?
-3. What relationships or connections need to be established?
-4. What minimal set of information pieces would be sufficient to answer this question?
-
-Return your analysis in JSON format:
-```json
-{{
-  "question_type": "type of question",
-  "key_entities": ["entity1", "entity2"],
-  "required_info": [
-    {{
-      "info_type": "what kind of information",
-      "description": "specific information needed",
-      "priority": "high/medium/low"
-    }}
-  ],
-  "relationships": ["relationship1", "relationship2"],
-  "minimal_queries_needed": 2
-}}
-```
-
-Focus on identifying the minimal essential information needed, not exhaustive details.
-Return ONLY the JSON, no other text."#
-        )
-    }
-
-    /// Build the targeted query generation prompt.
-    #[must_use]
-    pub fn targeted_queries(query: &str, plan_json: &str) -> String {
-        format!(
-            r#"Based on the information requirements analysis, generate the minimal set of targeted search queries needed to gather the required information.
-
-Original Question: {query}
-
-Information Requirements Analysis:
-{plan_json}
-
-Generate the minimal set of search queries that would efficiently gather all the required information.
 
 Guidelines:
-1. Always include the original query as one option
-2. Generate only the minimal necessary queries (usually 1-3)
-3. Each query should target a specific information requirement
-4. Avoid redundant or overlapping queries
-5. Focus on efficiency - fewer, more targeted queries are better
-
-Return your response in JSON format:
-```json
-{{
-  "reasoning": "Brief explanation of the query strategy",
-  "queries": [
-    "targeted query 1",
-    "targeted query 2"
-  ]
-}}
-```
+- keywords: Core topic words, names, places
+- search_queries: 1-3 targeted queries to find the needed information (always include a variant of the original question)
+- required_info: Minimal list of what facts are needed for a complete answer
 
 Return ONLY the JSON, no other text."#
-        )
-    }
+    )
+}
 
-    /// Build the information completeness analysis prompt (reflection).
-    #[must_use]
-    pub fn completeness_check(query: &str, context_str: &str, required_info_json: &str) -> String {
-        format!(
-            r#"Analyze whether the provided information is sufficient to completely answer the original question, based on the identified information requirements.
+/// Build the information completeness analysis prompt (reflection).
+#[must_use]
+pub fn completeness_check(query: &str, context_str: &str, required_info_json: &str) -> String {
+    format!(
+        r#"Analyze whether the provided information is sufficient to completely answer the original question, based on the identified information requirements.
 
 Original Question: {query}
 
@@ -199,18 +125,14 @@ Return your evaluation in JSON format:
 ```
 
 Return ONLY the JSON, no other text."#
-        )
-    }
+    )
+}
 
-    /// Build the missing-info query generation prompt (reflection additional queries).
-    #[must_use]
-    pub fn missing_info_queries(
-        query: &str,
-        context_str: &str,
-        required_info_json: &str,
-    ) -> String {
-        format!(
-            r#"Based on the original question, required information types, and currently available information, generate targeted search queries to find the missing information.
+/// Build the missing-info query generation prompt (reflection additional queries).
+#[must_use]
+pub fn missing_info_queries(query: &str, context_str: &str, required_info_json: &str) -> String {
+    format!(
+        r#"Based on the original question, required information types, and currently available information, generate targeted search queries to find the missing information.
 
 Original Question: {query}
 
@@ -233,14 +155,14 @@ Return your response in JSON format:
 ```
 
 Return ONLY the JSON, no other text."#
-        )
-    }
+    )
+}
 
-    /// Build the answer generation prompt.
-    #[must_use]
-    pub fn answer(query: &str, context_str: &str) -> String {
-        format!(
-            r#"Answer the user's question based on the provided context.
+/// Build the answer generation prompt.
+#[must_use]
+pub fn answer(query: &str, context_str: &str) -> String {
+    format!(
+        r#"Answer the user's question based on the provided context.
 
 User Question: {query}
 
@@ -263,53 +185,52 @@ Output Format:
 ```
 
 Now answer the question. Return ONLY the JSON, no other text."#
-        )
-    }
+    )
+}
 
-    /// Format memory entries as context string for answer generation.
-    #[must_use]
-    pub fn format_contexts(entries: &[MemoryEntry]) -> String {
-        entries
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let mut parts = vec![format!("[Context {}]", i + 1)];
-                parts.push(format!("Content: {}", e.restatement));
-                if let Some(ts) = e.timestamp {
-                    parts.push(format!("Time: {}", ts.format("%+")));
-                }
-                if let Some(loc) = &e.location {
-                    parts.push(format!("Location: {loc}"));
-                }
-                if !e.persons.is_empty() {
-                    parts.push(format!("Persons: {}", e.persons.join(", ")));
-                }
-                if !e.entities.is_empty() {
-                    parts.push(format!("Related Entities: {}", e.entities.join(", ")));
-                }
-                if let Some(topic) = &e.topic {
-                    parts.push(format!("Topic: {topic}"));
-                }
-                parts.join("\n")
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    }
+/// Format memory entries as context string for answer generation.
+#[must_use]
+pub fn format_contexts(entries: &[MemoryEntry]) -> String {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let mut parts = vec![format!("[Context {}]", i + 1)];
+            parts.push(format!("Content: {}", e.restatement));
+            if let Some(ts) = e.timestamp {
+                parts.push(format!("Time: {}", ts.format("%+")));
+            }
+            if let Some(loc) = &e.location {
+                parts.push(format!("Location: {loc}"));
+            }
+            if !e.persons.is_empty() {
+                parts.push(format!("Persons: {}", e.persons.join(", ")));
+            }
+            if !e.entities.is_empty() {
+                parts.push(format!("Related Entities: {}", e.entities.join(", ")));
+            }
+            if let Some(topic) = &e.topic {
+                parts.push(format!("Topic: {topic}"));
+            }
+            parts.join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
 
-    /// Format entries compactly for reflection/completeness checks.
-    #[must_use]
-    pub fn format_contexts_compact(entries: &[MemoryEntry]) -> String {
-        entries
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let mut line = format!("[Info {}] {}", i + 1, e.restatement);
-                if let Some(ts) = e.timestamp {
-                    let _ = write!(line, " | Time: {}", ts.format("%+"));
-                }
-                line
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+/// Format entries compactly for reflection/completeness checks.
+#[must_use]
+pub fn format_contexts_compact(entries: &[MemoryEntry]) -> String {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let mut line = format!("[Info {}] {}", i + 1, e.restatement);
+            if let Some(ts) = e.timestamp {
+                let _ = write!(line, " | Time: {}", ts.format("%+"));
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

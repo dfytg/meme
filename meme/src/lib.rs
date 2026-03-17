@@ -43,7 +43,6 @@ pub mod pipeline;
 pub mod store;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use config::Config;
@@ -66,7 +65,6 @@ pub struct Meme {
     builder: Mutex<MemoryBuilder>,
     retriever: HybridRetriever,
     config: Config,
-    dialogue_counter: AtomicU64,
 }
 
 impl std::fmt::Debug for Meme {
@@ -99,9 +97,7 @@ impl Meme {
         content: &str,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<()> {
-        let id = self.dialogue_counter.fetch_add(1, Ordering::Relaxed) + 1;
-
-        let mut dialogue = Dialogue::new(id, speaker, content);
+        let mut dialogue = Dialogue::new(speaker, content);
         if let Some(ts) = timestamp {
             dialogue = dialogue.with_timestamp(ts);
         }
@@ -315,7 +311,6 @@ impl MemeBuilder {
             builder: Mutex::new(mem_builder),
             retriever,
             config,
-            dialogue_counter: AtomicU64::new(0),
         })
     }
 }
