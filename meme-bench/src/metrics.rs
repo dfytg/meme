@@ -25,6 +25,9 @@ pub struct QuestionResult {
     pub recall: f64,
     /// Whether the prediction exactly matches the reference.
     pub exact_match: bool,
+    /// LLM-as-Judge score (0.0 or 1.0). `None` if judge was not used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_judge_score: Option<f64>,
 }
 
 /// Aggregated results for a scenario or the entire benchmark.
@@ -40,6 +43,8 @@ pub struct AggregateMetrics {
     pub mean_recall: f64,
     /// Fraction of exact-match predictions.
     pub exact_match_rate: f64,
+    /// Mean LLM-as-Judge score (if available).
+    pub mean_llm_judge: Option<f64>,
     /// Per-category breakdown.
     pub per_category: HashMap<QuestionCategory, CategoryMetrics>,
 }
@@ -55,6 +60,8 @@ pub struct CategoryMetrics {
     pub mean_precision: f64,
     /// Mean token-level recall.
     pub mean_recall: f64,
+    /// Mean LLM-as-Judge score (if available).
+    pub mean_llm_judge: Option<f64>,
 }
 
 /// Compute token-level F1 score between predicted and reference answers.
@@ -74,18 +81,13 @@ pub fn token_f1(predicted: &str, reference: &str) -> (f64, f64, f64) {
         return (0.0, 0.0, 0.0);
     }
 
-    let pred_set: HashMap<&str, usize> = count_tokens(&pred_tokens);
-    let ref_set: HashMap<&str, usize> = count_tokens(&ref_tokens);
+    let pred_set: std::collections::HashSet<&str> =
+        pred_tokens.iter().map(String::as_str).collect();
+    let ref_set: std::collections::HashSet<&str> = ref_tokens.iter().map(String::as_str).collect();
+    let overlap = pred_set.intersection(&ref_set).count();
 
-    let mut overlap = 0usize;
-    for (token, &pred_count) in &pred_set {
-        if let Some(&ref_count) = ref_set.get(token) {
-            overlap += pred_count.min(ref_count);
-        }
-    }
-
-    let precision = overlap as f64 / pred_tokens.len() as f64;
-    let recall = overlap as f64 / ref_tokens.len() as f64;
+    let precision = overlap as f64 / pred_set.len() as f64;
+    let recall = overlap as f64 / ref_set.len() as f64;
     let f1 = if precision + recall > 0.0 {
         2.0 * precision * recall / (precision + recall)
     } else {
@@ -129,6 +131,7 @@ pub fn aggregate(results: &[QuestionResult]) -> AggregateMetrics {
             mean_precision: 0.0,
             mean_recall: 0.0,
             exact_match_rate: 0.0,
+            mean_llm_judge: None,
             per_category: HashMap::new(),
         };
     }
@@ -147,15 +150,28 @@ pub fn aggregate(results: &[QuestionResult]) -> AggregateMetrics {
         .into_iter()
         .map(|(cat, items)| {
             let n = items.len();
+            let judge_scores: Vec<f64> = items.iter().filter_map(|r| r.llm_judge_score).collect();
             let cat_metrics = CategoryMetrics {
                 count: n,
                 mean_f1: items.iter().map(|r| r.f1).sum::<f64>() / n as f64,
                 mean_precision: items.iter().map(|r| r.precision).sum::<f64>() / n as f64,
                 mean_recall: items.iter().map(|r| r.recall).sum::<f64>() / n as f64,
+                mean_llm_judge: if judge_scores.is_empty() {
+                    None
+                } else {
+                    Some(judge_scores.iter().sum::<f64>() / judge_scores.len() as f64)
+                },
             };
             (cat, cat_metrics)
         })
         .collect();
+
+    let all_judge: Vec<f64> = results.iter().filter_map(|r| r.llm_judge_score).collect();
+    let mean_llm_judge = if all_judge.is_empty() {
+        None
+    } else {
+        Some(all_judge.iter().sum::<f64>() / all_judge.len() as f64)
+    };
 
     AggregateMetrics {
         total_questions: total,
@@ -163,6 +179,7 @@ pub fn aggregate(results: &[QuestionResult]) -> AggregateMetrics {
         mean_precision,
         mean_recall,
         exact_match_rate,
+        mean_llm_judge,
         per_category,
     }
 }
@@ -184,14 +201,6 @@ fn normalize_token(token: &str) -> String {
 
 fn normalize_answer(text: &str) -> String {
     normalize_tokens(text).join(" ")
-}
-
-fn count_tokens(tokens: &[String]) -> HashMap<&str, usize> {
-    let mut counts = HashMap::new();
-    for t in tokens {
-        *counts.entry(t.as_str()).or_insert(0) += 1;
-    }
-    counts
 }
 
 fn is_stopword(token: &str) -> bool {

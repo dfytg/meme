@@ -227,6 +227,7 @@ impl RunCmd {
                 precision,
                 recall,
                 exact_match,
+                llm_judge_score: None,
             });
 
             let status = if f1 >= 0.8 {

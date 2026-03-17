@@ -37,19 +37,19 @@ pub struct DialogueTurn {
     pub timestamp: Option<String>,
 }
 
-/// LOCOMO question categories.
+/// LOCOMO question categories (matches paper: cat 1–5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuestionCategory {
-    /// Requires recalling a single fact from the conversation.
+    /// Cat 1: Requires recalling a single fact from the conversation.
     SingleHop,
-    /// Requires combining multiple facts from different parts.
-    MultiHop,
-    /// Requires understanding temporal relationships and ordering.
+    /// Cat 2: Requires understanding temporal relationships and ordering.
     Temporal,
-    /// Questions that require commonsense or world knowledge beyond the conversation.
+    /// Cat 3: Questions requiring commonsense or world knowledge.
     Commonsense,
-    /// Adversarial questions designed to test hallucination resistance.
+    /// Cat 4: Open-domain detail questions (single-hop but detail-level).
+    OpenDomain,
+    /// Cat 5: Adversarial questions — correct answer is always refusal.
     Adversarial,
 }
 
@@ -57,9 +57,9 @@ impl std::fmt::Display for QuestionCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SingleHop => write!(f, "single_hop"),
-            Self::MultiHop => write!(f, "multi_hop"),
             Self::Temporal => write!(f, "temporal"),
             Self::Commonsense => write!(f, "commonsense"),
+            Self::OpenDomain => write!(f, "open_domain"),
             Self::Adversarial => write!(f, "adversarial"),
         }
     }
@@ -118,6 +118,8 @@ mod raw {
         #[serde(default)]
         #[allow(dead_code)]
         pub dia_id: Option<String>,
+        #[serde(default)]
+        pub blip_caption: Option<String>,
     }
 }
 
@@ -190,9 +192,18 @@ fn extract_dialogues(conv: &raw::Conversation) -> Vec<DialogueTurn> {
         };
 
         for item in items {
+            let content = if let Some(caption) = &item.blip_caption {
+                if item.text.is_empty() {
+                    format!("[Image: {caption}]")
+                } else {
+                    format!("[Image: {caption}] {}", item.text)
+                }
+            } else {
+                item.text
+            };
             dialogues.push(DialogueTurn {
                 speaker: item.speaker,
-                content: item.text,
+                content,
                 timestamp: session_ts.clone(),
             });
         }
@@ -204,7 +215,7 @@ const fn map_category(cat: u8) -> QuestionCategory {
     match cat {
         2 => QuestionCategory::Temporal,
         3 => QuestionCategory::Commonsense,
-        4 => QuestionCategory::MultiHop,
+        4 => QuestionCategory::OpenDomain,
         5 => QuestionCategory::Adversarial,
         _ => QuestionCategory::SingleHop,
     }
@@ -213,30 +224,29 @@ const fn map_category(cat: u8) -> QuestionCategory {
 fn convert_question(scenario_idx: usize, q_idx: usize, q: raw::RawQuestion) -> Question {
     let category = map_category(q.category);
 
-    let answer = if category == QuestionCategory::Adversarial {
-        // Adversarial questions have no ground-truth answer.
-        // The correct response is to indicate the information doesn't apply.
-        "unknown".to_owned()
+    let (answer, acceptable) = if category == QuestionCategory::Adversarial {
+        // Per LOCOMO/Mem0 methodology: adversarial ground truth is always refusal.
+        // The adversarial_answer field contains the WRONG answer (hallucination bait).
+        (
+            "Not mentioned in the conversation".to_owned(),
+            vec![
+                "not mentioned".to_owned(),
+                "I don't know".to_owned(),
+                "no information".to_owned(),
+                "cannot be determined".to_owned(),
+                "not available".to_owned(),
+            ],
+        )
     } else {
-        q.answer
+        let ans = q
+            .answer
             .map(|v| match v {
                 serde_json::Value::String(s) => s,
                 other => other.to_string(),
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        (ans, Vec::new())
     };
-
-    let mut acceptable = Vec::new();
-    if category == QuestionCategory::Adversarial {
-        // For adversarial: accepting refusal-style answers
-        acceptable.extend([
-            "I don't know".to_owned(),
-            "not mentioned".to_owned(),
-            "no information".to_owned(),
-            "cannot determine".to_owned(),
-            "not available".to_owned(),
-        ]);
-    }
 
     Question {
         id: format!("s{scenario_idx}_q{q_idx}"),
@@ -266,7 +276,7 @@ pub fn sample_dataset() -> BenchmarkDataset {
                 questions: vec![
                     Question { id: "s1_q1".into(), question: "When is the Q3 review meeting?".into(), answer: "Next Friday at 2pm".into(), category: QuestionCategory::SingleHop, acceptable_answers: vec!["Friday at 2pm".into(), "next Friday at 2 PM".into()] },
                     Question { id: "s1_q2".into(), question: "Where is the meeting taking place?".into(), answer: "Conference Room B".into(), category: QuestionCategory::SingleHop, acceptable_answers: vec!["Room B".into(), "conference room B".into()] },
-                    Question { id: "s1_q3".into(), question: "What will Bob prepare for the meeting?".into(), answer: "The sales report and customer feedback data".into(), category: QuestionCategory::MultiHop, acceptable_answers: vec!["sales report".into(), "sales report and customer feedback".into()] },
+                    Question { id: "s1_q3".into(), question: "What will Bob prepare for the meeting?".into(), answer: "The sales report and customer feedback data".into(), category: QuestionCategory::OpenDomain, acceptable_answers: vec!["sales report".into(), "sales report and customer feedback".into()] },
                     Question { id: "s1_q4".into(), question: "Which company did Charlie's office partner with?".into(), answer: "Siemens".into(), category: QuestionCategory::SingleHop, acceptable_answers: vec![] },
                     Question { id: "s1_q5".into(), question: "Where is Charlie based?".into(), answer: "Berlin".into(), category: QuestionCategory::SingleHop, acceptable_answers: vec!["the Berlin office".into()] },
                     Question { id: "s1_q6".into(), question: "Did Alice say the meeting would be on Monday?".into(), answer: "No, the meeting is on Friday".into(), category: QuestionCategory::Adversarial, acceptable_answers: vec!["No".into(), "No, it's on Friday".into()] },
@@ -286,8 +296,8 @@ pub fn sample_dataset() -> BenchmarkDataset {
                     Question { id: "s2_q1".into(), question: "Where is Dana traveling in November?".into(), answer: "Kyoto".into(), category: QuestionCategory::Temporal, acceptable_answers: vec!["Kyoto, Japan".into()] },
                     Question { id: "s2_q2".into(), question: "Why did Dana change the travel destination?".into(), answer: "Because her friend moved to Kyoto".into(), category: QuestionCategory::SingleHop, acceptable_answers: vec!["friend moved to Kyoto".into(), "her friend moved there".into()] },
                     Question { id: "s2_q3".into(), question: "What ramen place did Eve recommend?".into(), answer: "Ichiran Ramen in Shibuya".into(), category: QuestionCategory::SingleHop, acceptable_answers: vec!["Ichiran Ramen".into(), "Ichiran".into()] },
-                    Question { id: "s2_q4".into(), question: "Is Dana still planning to visit Akihabara?".into(), answer: "No, Dana changed plans to Kyoto instead of Tokyo".into(), category: QuestionCategory::MultiHop, acceptable_answers: vec!["No".into(), "No, she changed to Kyoto".into()] },
-                    Question { id: "s2_q5".into(), question: "What shrines were recommended across both destinations?".into(), answer: "Meiji Shrine in Tokyo and Fushimi Inari Shrine in Kyoto".into(), category: QuestionCategory::MultiHop, acceptable_answers: vec!["Meiji Shrine and Fushimi Inari".into()] },
+                    Question { id: "s2_q4".into(), question: "Is Dana still planning to visit Akihabara?".into(), answer: "No, Dana changed plans to Kyoto instead of Tokyo".into(), category: QuestionCategory::OpenDomain, acceptable_answers: vec!["No".into(), "No, she changed to Kyoto".into()] },
+                    Question { id: "s2_q5".into(), question: "What shrines were recommended across both destinations?".into(), answer: "Meiji Shrine in Tokyo and Fushimi Inari Shrine in Kyoto".into(), category: QuestionCategory::OpenDomain, acceptable_answers: vec!["Meiji Shrine and Fushimi Inari".into()] },
                 ],
             },
         ],

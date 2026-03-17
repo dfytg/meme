@@ -5,10 +5,8 @@ use std::path::Path;
 
 #[test]
 fn load_locomo10_dataset() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("3rdparty/locomo/data/locomo10.json");
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir.join("data/locomo10.json");
 
     if !path.exists() {
         eprintln!("Skipping: locomo10.json not found at {}", path.display());
