@@ -4,4 +4,4 @@ mod relational;
 mod vector;
 
 pub use relational::SqliteStore;
-pub use vector::{LanceDbStore, VectorStore};
+pub use vector::VectorStore;

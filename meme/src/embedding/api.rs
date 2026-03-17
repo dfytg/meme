@@ -2,7 +2,6 @@
 
 use serde::Deserialize;
 
-use super::provider::EmbeddingProvider;
 use crate::error::{Error, Result};
 
 /// Embedding provider that calls a remote OpenAI-compatible API.
@@ -54,6 +53,38 @@ impl ApiEmbedding {
         ))
     }
 
+    /// Returns the dimensionality of the embedding vectors.
+    #[must_use]
+    pub const fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    /// Encode a batch of document texts into embedding vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding fails.
+    pub async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let input: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
+        self.embed(input).await
+    }
+
+    /// Encode a single query text into an embedding vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding fails.
+    pub async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
+        let results = self.embed(vec![text.to_owned()]).await?;
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::Embedding("empty embedding response for query".to_owned()))
+    }
+
     async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
         let url = format!("{}/embeddings", self.base_url);
 
@@ -92,29 +123,6 @@ impl ApiEmbedding {
         vectors.sort_by_key(|(idx, _)| *idx);
 
         Ok(vectors.into_iter().map(|(_, v)| v).collect())
-    }
-}
-
-#[async_trait::async_trait]
-impl EmbeddingProvider for ApiEmbedding {
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        if texts.is_empty() {
-            return Ok(Vec::new());
-        }
-        let input: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
-        self.embed(input).await
-    }
-
-    async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
-        let results = self.embed(vec![text.to_owned()]).await?;
-        results
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::Embedding("empty embedding response for query".to_owned()))
     }
 }
 

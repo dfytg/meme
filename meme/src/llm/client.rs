@@ -73,20 +73,9 @@ impl Default for ChatOptions {
     }
 }
 
-/// LLM client trait — abstraction over OpenAI-compatible APIs.
-#[async_trait::async_trait]
-pub trait LlmClient: Send + Sync {
-    /// Send a chat completion request and return the response text.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API call fails after retries.
-    async fn chat(&self, messages: &[Message], opts: &ChatOptions) -> Result<String>;
-}
-
-/// OpenAI-compatible HTTP client.
+/// OpenAI-compatible HTTP LLM client.
 #[derive(Debug, Clone)]
-pub struct OpenAiClient {
+pub struct LlmClient {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
@@ -94,7 +83,7 @@ pub struct OpenAiClient {
     max_retries: u32,
 }
 
-impl OpenAiClient {
+impl LlmClient {
     /// Create a new client from configuration.
     ///
     /// # Errors
@@ -131,6 +120,31 @@ impl OpenAiClient {
         }
     }
 
+    /// Send a chat completion request and return the response text.
+    ///
+    /// Retries with exponential backoff on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API call fails after retries.
+    pub async fn chat(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
+        let mut last_err = None;
+        for attempt in 0..self.max_retries {
+            match self.call_api(messages, opts).await {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    tracing::warn!(attempt = attempt + 1, error = %e, "LLM API call failed");
+                    last_err = Some(e);
+                    if attempt + 1 < self.max_retries {
+                        let wait = 1u64 << attempt;
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    }
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| Error::Llm("all retries exhausted".to_owned())))
+    }
+
     async fn call_api(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -165,27 +179,6 @@ impl OpenAiClient {
             .as_str()
             .map(String::from)
             .ok_or_else(|| Error::Llm("missing content in API response".to_owned()))
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmClient for OpenAiClient {
-    async fn chat(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
-        let mut last_err = None;
-        for attempt in 0..self.max_retries {
-            match self.call_api(messages, opts).await {
-                Ok(content) => return Ok(content),
-                Err(e) => {
-                    tracing::warn!(attempt = attempt + 1, error = %e, "LLM API call failed");
-                    last_err = Some(e);
-                    if attempt + 1 < self.max_retries {
-                        let wait = 1u64 << attempt;
-                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
-                    }
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| Error::Llm("all retries exhausted".to_owned())))
     }
 }
 

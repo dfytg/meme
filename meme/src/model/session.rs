@@ -159,23 +159,6 @@ pub struct SessionSummary {
     pub vector_ref: Option<String>,
 }
 
-/// Traceability mapping from vectors back to source evidence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryLink {
-    /// Database row ID.
-    pub link_id: Option<i64>,
-    /// The memory entry this link points to.
-    pub memory_entry_id: Uuid,
-    /// Kind of source (`"observation"`, `"summary"`, `"event"`).
-    pub source_kind: String,
-    /// Source row ID.
-    pub source_id: i64,
-    /// Relevance score.
-    pub score: f64,
-    /// When the link was created.
-    pub timestamp: DateTime<Utc>,
-}
-
 /// Memory entry with cross-session provenance fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossEntry {

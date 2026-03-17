@@ -7,19 +7,19 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::config::PipelineConfig;
-use crate::embedding::EmbeddingProvider;
+use crate::embedding::Embedder;
 use crate::error::Result;
-use crate::llm::client::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::llm::prompt::Prompts;
+use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::model::{MemoryEntry, MetadataFilter};
 use crate::store::VectorStore;
 
 /// Hybrid retriever that combines semantic, lexical, and symbolic search
 /// with LLM-driven intent analysis and reflection.
 pub struct HybridRetriever {
-    llm: Arc<dyn LlmClient>,
-    store: Arc<dyn VectorStore>,
-    embedding: Arc<dyn EmbeddingProvider>,
+    llm: Arc<LlmClient>,
+    store: Arc<VectorStore>,
+    embedder: Arc<Embedder>,
     semantic_top_k: usize,
     keyword_top_k: usize,
     structured_top_k: usize,
@@ -41,17 +41,18 @@ impl std::fmt::Debug for HybridRetriever {
 
 impl HybridRetriever {
     /// Create a new hybrid retriever.
-    pub fn new(
-        llm: Arc<dyn LlmClient>,
-        store: Arc<dyn VectorStore>,
-        embedding: Arc<dyn EmbeddingProvider>,
+    #[must_use]
+    pub const fn new(
+        llm: Arc<LlmClient>,
+        store: Arc<VectorStore>,
+        embedder: Arc<Embedder>,
         pipeline_cfg: &PipelineConfig,
         max_retrieval_workers: usize,
     ) -> Self {
         Self {
             llm,
             store,
-            embedding,
+            embedder,
             semantic_top_k: pipeline_cfg.semantic_top_k,
             keyword_top_k: pipeline_cfg.keyword_top_k,
             structured_top_k: pipeline_cfg.structured_top_k,
@@ -115,7 +116,7 @@ impl HybridRetriever {
     }
 
     async fn semantic_search(&self, query: &str) -> Result<Vec<MemoryEntry>> {
-        let query_vec = self.embedding.encode_query(query).await?;
+        let query_vec = self.embedder.encode_query(query).await?;
         self.store
             .semantic_search(&query_vec, self.semantic_top_k)
             .await
@@ -197,14 +198,14 @@ impl HybridRetriever {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_retrieval_workers));
 
         for query in queries {
-            let embedding = Arc::clone(&self.embedding);
+            let embedder = Arc::clone(&self.embedder);
             let store = Arc::clone(&self.store);
             let top_k = self.semantic_top_k;
             let q = query.clone();
             let sem = Arc::clone(&semaphore);
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await;
-                let query_vec = embedding.encode_query(&q).await?;
+                let query_vec = embedder.encode_query(&q).await?;
                 store.semantic_search(&query_vec, top_k).await
             }));
         }

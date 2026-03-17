@@ -43,15 +43,16 @@ pub mod pipeline;
 pub mod store;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use config::Config;
-use embedding::{ApiEmbedding, EmbeddingProvider};
+use embedding::{ApiEmbedding, Embedder};
 use error::Result;
-use llm::client::{LlmClient, OpenAiClient};
+use llm::LlmClient;
 use model::{Dialogue, MemoryEntry};
 use pipeline::{AnswerGenerator, HybridRetriever, MemoryBuilder};
-use store::{LanceDbStore, VectorStore};
+use store::VectorStore;
 use tokio::sync::Mutex;
 
 /// The main entry point for the meme memory system.
@@ -59,13 +60,13 @@ use tokio::sync::Mutex;
 /// Wraps the three-stage pipeline (compression, synthesis, retrieval)
 /// behind a simple async API.
 pub struct Meme {
-    store: Arc<dyn VectorStore>,
-    embedding: Arc<dyn EmbeddingProvider>,
+    store: Arc<VectorStore>,
+    embedder: Arc<Embedder>,
     builder: Mutex<MemoryBuilder>,
     retriever: HybridRetriever,
     generator: AnswerGenerator,
     config: Config,
-    dialogue_counter: Mutex<u64>,
+    dialogue_counter: AtomicU64,
 }
 
 impl std::fmt::Debug for Meme {
@@ -98,11 +99,7 @@ impl Meme {
         content: &str,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<()> {
-        let id = {
-            let mut counter = self.dialogue_counter.lock().await;
-            *counter += 1;
-            *counter
-        };
+        let id = self.dialogue_counter.fetch_add(1, Ordering::Relaxed) + 1;
 
         let mut dialogue = Dialogue::new(id, speaker, content);
         if let Some(ts) = timestamp {
@@ -196,7 +193,7 @@ impl Meme {
 
     async fn store_entries(&self, entries: &[MemoryEntry]) -> Result<()> {
         let texts: Vec<&str> = entries.iter().map(|e| e.restatement.as_str()).collect();
-        let vectors = self.embedding.encode_documents(&texts).await?;
+        let vectors = self.embedder.encode_documents(&texts).await?;
         self.store.add_entries(entries, &vectors).await
     }
 }
@@ -275,16 +272,18 @@ impl MemeBuilder {
         }
 
         // Build components.
-        let llm: Arc<dyn LlmClient> = Arc::new(OpenAiClient::from_config(&config.llm)?);
+        let llm = Arc::new(LlmClient::from_config(&config.llm)?);
 
-        let embedding: Arc<dyn EmbeddingProvider> =
-            Arc::new(ApiEmbedding::from_config(&config.embedding, &config.llm)?);
+        let embedder = Arc::new(Embedder::Api(ApiEmbedding::from_config(
+            &config.embedding,
+            &config.llm,
+        )?));
 
-        let store: Arc<dyn VectorStore> = Arc::new(
-            LanceDbStore::open(
+        let store = Arc::new(
+            VectorStore::open(
                 &config.store.lancedb_path,
                 &config.store.table_name,
-                Arc::clone(&embedding),
+                embedder.dimension(),
             )
             .await?,
         );
@@ -296,15 +295,15 @@ impl MemeBuilder {
         let mem_builder = MemoryBuilder::new(
             Arc::clone(&llm),
             &config.pipeline,
-            config.parallel.max_build_workers,
+            config.pipeline.max_build_workers,
         );
 
         let retriever = HybridRetriever::new(
             Arc::clone(&llm),
             Arc::clone(&store),
-            Arc::clone(&embedding),
+            Arc::clone(&embedder),
             &config.pipeline,
-            config.parallel.max_retrieval_workers,
+            config.pipeline.max_retrieval_workers,
         );
 
         let generator = AnswerGenerator::new(Arc::clone(&llm));
@@ -313,12 +312,12 @@ impl MemeBuilder {
 
         Ok(Meme {
             store,
-            embedding,
+            embedder,
             builder: Mutex::new(mem_builder),
             retriever,
             generator,
             config,
-            dialogue_counter: Mutex::new(0),
+            dialogue_counter: AtomicU64::new(0),
         })
     }
 }

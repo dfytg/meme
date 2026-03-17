@@ -10,7 +10,7 @@ use super::extractor::ObservationExtractor;
 use super::injector::ContextInjector;
 use super::session::SessionManager;
 use crate::config::{Config, CrossConfig};
-use crate::embedding::EmbeddingProvider;
+use crate::embedding::Embedder;
 use crate::error::Result;
 use crate::model::{ContextBundle, CrossEntry, FinalizationReport, Session, SessionSummary};
 use crate::store::{SqliteStore, VectorStore};
@@ -32,8 +32,8 @@ pub struct StartSessionResult {
 /// event collection, and consolidation into a single facade.
 pub struct CrossOrchestrator {
     db: SqliteStore,
-    vector_store: Option<Arc<dyn VectorStore>>,
-    embedding: Option<Arc<dyn EmbeddingProvider>>,
+    vector_store: Option<Arc<VectorStore>>,
+    embedder: Option<Arc<Embedder>>,
     project: String,
     tenant_id: String,
     cross_cfg: CrossConfig,
@@ -62,7 +62,7 @@ impl CrossOrchestrator {
         Ok(Self {
             db,
             vector_store: None,
-            embedding: None,
+            embedder: None,
             project: project.to_owned(),
             tenant_id: "default".to_owned(),
             cross_cfg: config.cross.clone(),
@@ -79,14 +79,14 @@ impl CrossOrchestrator {
     pub fn with_stores(
         project: &str,
         config: &Config,
-        vector_store: Arc<dyn VectorStore>,
-        embedding: Arc<dyn EmbeddingProvider>,
+        vector_store: Arc<VectorStore>,
+        embedder: Arc<Embedder>,
     ) -> Result<Self> {
         let db = SqliteStore::open(&config.cross.db_path)?;
         Ok(Self {
             db,
             vector_store: Some(vector_store),
-            embedding: Some(embedding),
+            embedder: Some(embedder),
             project: project.to_owned(),
             tenant_id: "default".to_owned(),
             cross_cfg: config.cross.clone(),
@@ -103,7 +103,7 @@ impl CrossOrchestrator {
         Ok(Self {
             db,
             vector_store: None,
-            embedding: None,
+            embedder: None,
             project: project.to_owned(),
             tenant_id: tenant_id.to_owned(),
             cross_cfg: config.cross.clone(),
@@ -137,7 +137,7 @@ impl CrossOrchestrator {
                 &self.project,
                 user_prompt,
                 self.vector_store.as_deref(),
-                self.embedding.as_deref(),
+                self.embedder.as_deref(),
             )
             .await?;
         let context_text = context.render(self.cross_cfg.max_context_tokens);

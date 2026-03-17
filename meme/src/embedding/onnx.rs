@@ -6,7 +6,6 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::provider::EmbeddingProvider;
 use crate::error::{Error, Result};
 
 /// Embedding provider that runs a local ONNX model via `ort`.
@@ -50,6 +49,46 @@ impl OnnxEmbedding {
             tokenizer: Arc::new(tokenizer),
             dimension,
         })
+    }
+
+    /// Returns the dimensionality of the embedding vectors.
+    #[must_use]
+    pub const fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    /// Encode a batch of document texts into embedding vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding fails.
+    pub async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let owned: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
+        let session = Arc::clone(&self.session);
+        let tokenizer = Arc::clone(&self.tokenizer);
+        let dimension = self.dimension;
+        tokio::task::spawn_blocking(move || {
+            let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+            encode_batch_sync(&session, &tokenizer, &refs, dimension)
+        })
+        .await
+        .map_err(|e| Error::Embedding(format!("spawn_blocking failed: {e}")))?
+    }
+
+    /// Encode a single query text into an embedding vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding fails.
+    pub async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
+        let results = self.encode_documents(&[text]).await?;
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::Embedding("empty result from ONNX query encoding".to_owned()))
     }
 }
 
@@ -124,35 +163,4 @@ fn encode_batch_sync(
     }
 
     Ok(results)
-}
-
-#[async_trait::async_trait]
-impl EmbeddingProvider for OnnxEmbedding {
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        if texts.is_empty() {
-            return Ok(Vec::new());
-        }
-        let owned: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
-        let session = Arc::clone(&self.session);
-        let tokenizer = Arc::clone(&self.tokenizer);
-        let dimension = self.dimension;
-        tokio::task::spawn_blocking(move || {
-            let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
-            encode_batch_sync(&session, &tokenizer, &refs, dimension)
-        })
-        .await
-        .map_err(|e| Error::Embedding(format!("spawn_blocking failed: {e}")))?
-    }
-
-    async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
-        let results = self.encode_documents(&[text]).await?;
-        results
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::Embedding("empty result from ONNX query encoding".to_owned()))
-    }
 }

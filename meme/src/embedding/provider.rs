@@ -1,29 +1,52 @@
-//! Trait definition for embedding providers.
+//! Embedding provider — unified enum dispatch for API and ONNX backends.
 
+use super::api::ApiEmbedding;
 use crate::error::Result;
 
-/// Unified interface for embedding vector computation.
-///
-/// Implementations may use a remote API or a local ONNX model.
-#[async_trait::async_trait]
-pub trait EmbeddingProvider: Send + Sync {
+/// Unified embedding provider using enum dispatch (zero-cost, no boxing).
+#[derive(Debug)]
+pub enum Embedder {
+    /// Remote API-based embedding.
+    Api(ApiEmbedding),
+    /// Local ONNX Runtime inference.
+    #[cfg(feature = "onnx")]
+    Onnx(super::onnx::OnnxEmbedding),
+}
+
+impl Embedder {
     /// Returns the dimensionality of the embedding vectors.
-    fn dimension(&self) -> usize;
+    #[must_use]
+    pub const fn dimension(&self) -> usize {
+        match self {
+            Self::Api(e) => e.dimension(),
+            #[cfg(feature = "onnx")]
+            Self::Onnx(e) => e.dimension(),
+        }
+    }
 
     /// Encode a batch of document texts into embedding vectors.
     ///
     /// # Errors
     ///
     /// Returns an error if encoding fails.
-    async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
+    pub async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        match self {
+            Self::Api(e) => e.encode_documents(texts).await,
+            #[cfg(feature = "onnx")]
+            Self::Onnx(e) => e.encode_documents(texts).await,
+        }
+    }
 
     /// Encode a single query text into an embedding vector.
-    ///
-    /// Query encoding may use a different prompt prefix than document encoding
-    /// (e.g., Qwen3's `query:` prefix for asymmetric retrieval).
     ///
     /// # Errors
     ///
     /// Returns an error if encoding fails.
-    async fn encode_query(&self, text: &str) -> Result<Vec<f32>>;
+    pub async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
+        match self {
+            Self::Api(e) => e.encode_query(text).await,
+            #[cfg(feature = "onnx")]
+            Self::Onnx(e) => e.encode_query(text).await,
+        }
+    }
 }

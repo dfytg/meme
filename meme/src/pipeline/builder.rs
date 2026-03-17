@@ -10,14 +10,14 @@ use uuid::Uuid;
 
 use crate::config::PipelineConfig;
 use crate::error::{Error, Result};
-use crate::llm::client::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::llm::prompt::Prompts;
+use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::model::{Dialogue, MemoryEntry};
 
 /// Memory builder that implements Stage 1 (Semantic Structured Compression)
 /// and Stage 2 (Online Semantic Synthesis) of the `SimpleMem` pipeline.
 pub struct MemoryBuilder {
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<LlmClient>,
     window_size: usize,
     overlap_size: usize,
     step_size: usize,
@@ -40,8 +40,9 @@ impl std::fmt::Debug for MemoryBuilder {
 
 impl MemoryBuilder {
     /// Create a new memory builder.
+    #[must_use]
     pub fn new(
-        llm: Arc<dyn LlmClient>,
+        llm: Arc<LlmClient>,
         pipeline_cfg: &PipelineConfig,
         max_parallel_workers: usize,
     ) -> Self {
@@ -221,7 +222,7 @@ impl MemoryBuilder {
 }
 
 async fn generate_entries_standalone(
-    llm: &Arc<dyn LlmClient>,
+    llm: &Arc<LlmClient>,
     dialogues: &[Dialogue],
     context: &str,
 ) -> Result<Vec<MemoryEntry>> {

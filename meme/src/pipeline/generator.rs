@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::llm::client::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::llm::prompt::Prompts;
+use crate::llm::{ChatOptions, LlmClient, Message, extract_json_from_text};
 use crate::model::MemoryEntry;
 
 /// Generates concise answers from retrieved memory entries.
 pub struct AnswerGenerator {
-    llm: Arc<dyn LlmClient>,
+    llm: Arc<LlmClient>,
 }
 
 impl std::fmt::Debug for AnswerGenerator {
@@ -20,7 +20,8 @@ impl std::fmt::Debug for AnswerGenerator {
 
 impl AnswerGenerator {
     /// Create a new answer generator.
-    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
+    #[must_use]
+    pub const fn new(llm: Arc<LlmClient>) -> Self {
         Self { llm }
     }
 

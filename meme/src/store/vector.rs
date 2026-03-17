@@ -10,82 +10,38 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
-use crate::embedding::EmbeddingProvider;
 use crate::error::{Error, Result};
 use crate::model::{MemoryEntry, MetadataFilter};
 
-/// Trait for vector-based storage and retrieval of memory entries.
-#[async_trait::async_trait]
-pub trait VectorStore: Send + Sync {
-    /// Add entries with their pre-computed embedding vectors.
-    async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()>;
-
-    /// Semantic search by vector similarity.
-    async fn semantic_search(&self, query_vec: &[f32], top_k: usize) -> Result<Vec<MemoryEntry>>;
-
-    /// Keyword search (scans restatement text for keyword matches).
-    async fn keyword_search(&self, keywords: &[String], top_k: usize) -> Result<Vec<MemoryEntry>>;
-
-    /// Structured search by metadata filtering.
-    async fn structured_search(
-        &self,
-        filter: &MetadataFilter,
-        top_k: usize,
-    ) -> Result<Vec<MemoryEntry>>;
-
-    /// Retrieve all entries.
-    async fn get_all(&self) -> Result<Vec<MemoryEntry>>;
-
-    /// Retrieve all entries together with their embedding vectors.
-    async fn get_all_with_vectors(&self) -> Result<Vec<(MemoryEntry, Vec<f32>)>>;
-
-    /// Delete entries by their IDs.
-    async fn delete_entries(&self, entry_ids: &[String]) -> Result<usize>;
-
-    /// Count the total number of entries.
-    async fn count(&self) -> Result<usize>;
-
-    /// Clear all data and reinitialize.
-    async fn clear(&self) -> Result<()>;
-
-    /// Optimize storage after bulk insertions for better query performance.
-    async fn optimize(&self) -> Result<()>;
-}
-
-/// LanceDB-backed vector store.
-pub struct LanceDbStore {
+/// `LanceDB`-backed vector store with multi-view indexing.
+pub struct VectorStore {
     db: lancedb::Connection,
     table_name: String,
     dimension: usize,
 }
 
-impl std::fmt::Debug for LanceDbStore {
+impl std::fmt::Debug for VectorStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LanceDbStore")
+        f.debug_struct("VectorStore")
             .field("table_name", &self.table_name)
             .field("dimension", &self.dimension)
             .finish_non_exhaustive()
     }
 }
 
-impl LanceDbStore {
+impl VectorStore {
     /// Open or create a `LanceDB` store.
     ///
     /// # Errors
     ///
     /// Returns an error if the database cannot be opened.
-    pub async fn open(
-        db_path: &str,
-        table_name: &str,
-        embedding: Arc<dyn EmbeddingProvider>,
-    ) -> Result<Self> {
+    pub async fn open(db_path: &str, table_name: &str, dimension: usize) -> Result<Self> {
         std::fs::create_dir_all(db_path)?;
         let db = lancedb::connect(db_path)
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("failed to connect: {e}")))?;
 
-        let dimension = embedding.dimension();
         let store = Self {
             db,
             table_name: table_name.to_owned(),
@@ -222,58 +178,13 @@ impl LanceDbStore {
         }
         entries
     }
-}
 
-fn split_delimited(s: &str) -> Vec<String> {
-    if s.is_empty() {
-        Vec::new()
-    } else {
-        s.split("||")
-            .map(|p| p.trim().to_owned())
-            .filter(|p| !p.is_empty())
-            .collect()
-    }
-}
-
-fn join_delimited(items: &[String]) -> String {
-    items.join("||")
-}
-
-fn escape_like(s: &str) -> String {
-    s.replace('\'', "''")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
-}
-
-fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
-    let n = batch.num_rows();
-    let Some(col) = batch.column_by_name("vector") else {
-        return vec![Vec::new(); n];
-    };
-    let Some(fsl) = col.as_any().downcast_ref::<FixedSizeListArray>() else {
-        return vec![Vec::new(); n];
-    };
-    let values = fsl.values();
-    let Some(float_values) = values.as_any().downcast_ref::<Float32Array>() else {
-        return vec![Vec::new(); n];
-    };
-
-    let mut vectors = Vec::with_capacity(n);
-    for i in 0..n {
-        let start = i * dimension;
-        let end = start + dimension;
-        if end <= float_values.len() {
-            vectors.push(float_values.values()[start..end].to_vec());
-        } else {
-            vectors.push(Vec::new());
-        }
-    }
-    vectors
-}
-
-#[async_trait::async_trait]
-impl VectorStore for LanceDbStore {
-    async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()> {
+    /// Add entries with their pre-computed embedding vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the table cannot be opened or data insertion fails.
+    pub async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -388,7 +299,16 @@ impl VectorStore for LanceDbStore {
         Ok(())
     }
 
-    async fn semantic_search(&self, query_vec: &[f32], top_k: usize) -> Result<Vec<MemoryEntry>> {
+    /// Semantic search by vector similarity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the vector query fails.
+    pub async fn semantic_search(
+        &self,
+        query_vec: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         let table = self.get_table().await?;
         if table
             .count_rows(None)
@@ -419,7 +339,16 @@ impl VectorStore for LanceDbStore {
             .collect())
     }
 
-    async fn keyword_search(&self, keywords: &[String], top_k: usize) -> Result<Vec<MemoryEntry>> {
+    /// Keyword search (scans restatement text for keyword matches).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the search query fails.
+    pub async fn keyword_search(
+        &self,
+        keywords: &[String],
+        top_k: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         if keywords.is_empty() {
             return Ok(Vec::new());
         }
@@ -490,7 +419,12 @@ impl VectorStore for LanceDbStore {
             .collect())
     }
 
-    async fn structured_search(
+    /// Structured search by metadata filtering.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the filter query fails.
+    pub async fn structured_search(
         &self,
         filter: &MetadataFilter,
         top_k: usize,
@@ -568,7 +502,12 @@ impl VectorStore for LanceDbStore {
             .collect())
     }
 
-    async fn get_all(&self) -> Result<Vec<MemoryEntry>> {
+    /// Retrieve all entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the read operation fails.
+    pub async fn get_all(&self) -> Result<Vec<MemoryEntry>> {
         let table = self.get_table().await?;
         let results = table
             .query()
@@ -587,7 +526,12 @@ impl VectorStore for LanceDbStore {
             .collect())
     }
 
-    async fn get_all_with_vectors(&self) -> Result<Vec<(MemoryEntry, Vec<f32>)>> {
+    /// Retrieve all entries together with their embedding vectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the read operation fails.
+    pub async fn get_all_with_vectors(&self) -> Result<Vec<(MemoryEntry, Vec<f32>)>> {
         let table = self.get_table().await?;
         let results = table
             .query()
@@ -611,7 +555,12 @@ impl VectorStore for LanceDbStore {
         Ok(pairs)
     }
 
-    async fn delete_entries(&self, entry_ids: &[String]) -> Result<usize> {
+    /// Delete entries by their IDs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete operation fails.
+    pub async fn delete_entries(&self, entry_ids: &[String]) -> Result<usize> {
         if entry_ids.is_empty() {
             return Ok(0);
         }
@@ -631,7 +580,12 @@ impl VectorStore for LanceDbStore {
         Ok(count)
     }
 
-    async fn count(&self) -> Result<usize> {
+    /// Count the total number of entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the count operation fails.
+    pub async fn count(&self) -> Result<usize> {
         let table = self.get_table().await?;
         table
             .count_rows(None)
@@ -639,7 +593,12 @@ impl VectorStore for LanceDbStore {
             .map_err(|e| Error::VectorStore(format!("count failed: {e}")))
     }
 
-    async fn clear(&self) -> Result<()> {
+    /// Clear all data and reinitialize.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the table cannot be dropped or recreated.
+    pub async fn clear(&self) -> Result<()> {
         self.db
             .drop_table(&self.table_name, &[])
             .await
@@ -648,14 +607,51 @@ impl VectorStore for LanceDbStore {
         tracing::info!(table = %self.table_name, "cleared vector store");
         Ok(())
     }
+}
 
-    async fn optimize(&self) -> Result<()> {
-        let table = self.get_table().await?;
-        table
-            .optimize(lancedb::table::OptimizeAction::All)
-            .await
-            .map_err(|e| Error::VectorStore(format!("optimize failed: {e}")))?;
-        tracing::info!(table = %self.table_name, "vector store optimized");
-        Ok(())
+fn split_delimited(s: &str) -> Vec<String> {
+    if s.is_empty() {
+        Vec::new()
+    } else {
+        s.split("||")
+            .map(|p| p.trim().to_owned())
+            .filter(|p| !p.is_empty())
+            .collect()
     }
+}
+
+fn join_delimited(items: &[String]) -> String {
+    items.join("||")
+}
+
+fn escape_like(s: &str) -> String {
+    s.replace('\'', "''")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
+    let n = batch.num_rows();
+    let Some(col) = batch.column_by_name("vector") else {
+        return vec![Vec::new(); n];
+    };
+    let Some(fsl) = col.as_any().downcast_ref::<FixedSizeListArray>() else {
+        return vec![Vec::new(); n];
+    };
+    let values = fsl.values();
+    let Some(float_values) = values.as_any().downcast_ref::<Float32Array>() else {
+        return vec![Vec::new(); n];
+    };
+
+    let mut vectors = Vec::with_capacity(n);
+    for i in 0..n {
+        let start = i * dimension;
+        let end = start + dimension;
+        if end <= float_values.len() {
+            vectors.push(float_values.values()[start..end].to_vec());
+        } else {
+            vectors.push(Vec::new());
+        }
+    }
+    vectors
 }

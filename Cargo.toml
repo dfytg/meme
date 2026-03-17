@@ -4,19 +4,18 @@ default-members = ["meme"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/meme"
 description = "Long term memory for AI agents."
 
 [workspace.dependencies]
-meme = { path = "meme" }
+meme = {version = "0.2", path = "meme" }
 
 # Async runtime
 tokio = { version = "1.50.0", features = ["full"] }
 futures = "0.3.32"
-async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0.228", features = ["derive"] }

@@ -14,8 +14,6 @@ onnx = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
 [dependencies]
 tokio.workspace = true
 futures.workspace = true
-async-trait.workspace = true
-
 serde.workspace = true
 serde_json.workspace = true
 

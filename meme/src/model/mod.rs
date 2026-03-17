@@ -8,6 +8,5 @@ pub use dialogue::Dialogue;
 pub use entry::{MemoryEntry, MetadataFilter};
 pub use session::{
     ConsolidationRun, ContextBundle, CrossEntry, CrossObservation, EventKind, FinalizationReport,
-    MemoryLink, ObservationType, RedactionLevel, Session, SessionEvent, SessionStatus,
-    SessionSummary,
+    ObservationType, RedactionLevel, Session, SessionEvent, SessionStatus, SessionSummary,
 };

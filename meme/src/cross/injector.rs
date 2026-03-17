@@ -7,7 +7,7 @@
 
 use uuid::Uuid;
 
-use crate::embedding::EmbeddingProvider;
+use crate::embedding::Embedder;
 use crate::error::Result;
 use crate::model::{ContextBundle, CrossEntry, CrossObservation, SessionSummary};
 use crate::store::{SqliteStore, VectorStore};
@@ -47,8 +47,8 @@ impl<'a> ContextInjector<'a> {
         &self,
         project: &str,
         user_prompt: Option<&str>,
-        vector_store: Option<&dyn VectorStore>,
-        embedding: Option<&dyn EmbeddingProvider>,
+        vector_store: Option<&VectorStore>,
+        embedder: Option<&Embedder>,
     ) -> Result<ContextBundle> {
         let mut budget_remaining = self.max_tokens;
         let mut total_tokens = 0usize;
@@ -80,18 +80,17 @@ impl<'a> ContextInjector<'a> {
         );
 
         // Tier 3: Semantic search against user_prompt.
-        let memory_entries = if let (Some(prompt), Some(store), Some(emb)) =
-            (user_prompt, vector_store, embedding)
-        {
-            if budget_remaining > 0 && !prompt.is_empty() {
-                self.semantic_search_entries(prompt, store, emb, budget_remaining)
-                    .await?
+        let memory_entries =
+            if let (Some(prompt), Some(store), Some(emb)) = (user_prompt, vector_store, embedder) {
+                if budget_remaining > 0 && !prompt.is_empty() {
+                    self.semantic_search_entries(prompt, store, emb, budget_remaining)
+                        .await?
+                } else {
+                    Vec::new()
+                }
             } else {
                 Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
+            };
 
         if !memory_entries.is_empty() {
             let entry_tokens: usize = memory_entries
@@ -127,11 +126,11 @@ impl<'a> ContextInjector<'a> {
     async fn semantic_search_entries(
         &self,
         prompt: &str,
-        store: &dyn VectorStore,
-        embedding: &dyn EmbeddingProvider,
+        store: &VectorStore,
+        embedder: &Embedder,
         budget_remaining: usize,
     ) -> Result<Vec<CrossEntry>> {
-        let query_vec = embedding.encode_query(prompt).await?;
+        let query_vec = embedder.encode_query(prompt).await?;
         let top_k = 10;
         let entries = store.semantic_search(&query_vec, top_k).await?;
 

@@ -19,8 +19,6 @@ pub struct Config {
     pub store: StoreConfig,
     /// Pipeline parameters.
     pub pipeline: PipelineConfig,
-    /// Parallel processing configuration.
-    pub parallel: ParallelConfig,
     /// Cross-session configuration.
     pub cross: CrossConfig,
 }
@@ -208,6 +206,10 @@ pub struct PipelineConfig {
     pub enable_reflection: bool,
     /// Maximum number of reflection rounds.
     pub max_reflection_rounds: usize,
+    /// Max concurrent workers for memory building.
+    pub max_build_workers: usize,
+    /// Max concurrent workers for retrieval queries.
+    pub max_retrieval_workers: usize,
 }
 
 impl Default for PipelineConfig {
@@ -221,23 +223,6 @@ impl Default for PipelineConfig {
             enable_planning: true,
             enable_reflection: true,
             max_reflection_rounds: 2,
-        }
-    }
-}
-
-/// Parallel processing configuration.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ParallelConfig {
-    /// Max concurrent workers for memory building.
-    pub max_build_workers: usize,
-    /// Max concurrent workers for retrieval queries.
-    pub max_retrieval_workers: usize,
-}
-
-impl Default for ParallelConfig {
-    fn default() -> Self {
-        Self {
             max_build_workers: 16,
             max_retrieval_workers: 8,
         }

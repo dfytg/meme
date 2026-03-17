@@ -8,4 +8,4 @@ mod provider;
 pub use api::ApiEmbedding;
 #[cfg(feature = "onnx")]
 pub use onnx::OnnxEmbedding;
-pub use provider::EmbeddingProvider;
+pub use provider::Embedder;
