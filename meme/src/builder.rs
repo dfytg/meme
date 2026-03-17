@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::config::{self, Config};
 use crate::embedding::{self, Embedder};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::facade::Meme;
 use crate::http;
 use crate::llm::LlmClient;
@@ -124,11 +124,6 @@ impl MemeBuilder {
             }
         });
 
-        let db = lancedb::connect(&config.store.lancedb_path)
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("failed to connect: {e}")))?;
-
         let store = Arc::new(
             VectorStore::open(
                 &config.store.lancedb_path,
@@ -138,8 +133,11 @@ impl MemeBuilder {
             .await?,
         );
 
-        let history_table = format!("{}_history", config.store.table_name);
-        let history = Arc::new(HistoryStore::open(db, &history_table).await?);
+        let history_path = std::path::Path::new(&config.store.lancedb_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("history.db");
+        let history = Arc::new(HistoryStore::open(&history_path)?);
 
         if self.clear_db {
             store.clear_all().await?;

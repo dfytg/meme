@@ -1,4 +1,4 @@
-//! Storage layer — `LanceDB` vector store with multi-view indexing and history tracking.
+//! Storage layer — `LanceDB` vector store with multi-view indexing and `SQLite` history tracking.
 
 mod history;
 mod vector;

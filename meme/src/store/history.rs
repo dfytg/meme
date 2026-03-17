@@ -1,91 +1,77 @@
 //! Memory history store — tracks all lifecycle events (add/update/delete).
 //!
-//! Uses a separate `LanceDB` table for zero-dependency persistence.
+//! Uses `SQLite` with WAL mode for ACID-compliant, low-latency persistence.
 
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
-use arrow_array::{Array, RecordBatch, RecordBatchIterator, StringArray};
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use chrono::Utc;
-use futures::TryStreamExt;
-use lancedb::query::{ExecutableQuery, QueryBase};
+use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
 use crate::model::{EventType, MemoryEvent};
 
-/// Persistent store for memory lifecycle events.
+/// Persistent store for memory lifecycle events backed by `SQLite`.
 pub struct HistoryStore {
-    db: lancedb::Connection,
-    table_name: String,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl std::fmt::Debug for HistoryStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HistoryStore")
-            .field("table_name", &self.table_name)
-            .finish_non_exhaustive()
+        f.debug_struct("HistoryStore").finish_non_exhaustive()
     }
 }
 
 impl HistoryStore {
-    /// Open or create the history table.
+    /// Open (or create) the `SQLite` history database at the given path.
+    ///
+    /// Enables WAL mode and creates the schema if it does not exist.
     ///
     /// # Errors
     ///
-    /// Returns an error if the database connection fails.
-    pub async fn open(db: lancedb::Connection, table_name: &str) -> Result<Self> {
-        let store = Self {
-            db,
-            table_name: table_name.to_owned(),
-        };
-        store.ensure_table().await?;
-        Ok(store)
-    }
+    /// Returns an error if the database cannot be opened or migrated.
+    pub fn open(path: &Path) -> Result<Self> {
+        let conn = Connection::open(path)
+            .map_err(|e| Error::History(format!("open {}: {e}", path.display())))?;
 
-    fn schema() -> SchemaRef {
-        Arc::new(Schema::new(vec![
-            Field::new("event_id", DataType::Utf8, false),
-            Field::new("memory_id", DataType::Utf8, false),
-            Field::new("event_type", DataType::Utf8, false),
-            Field::new("old_content", DataType::Utf8, true),
-            Field::new("new_content", DataType::Utf8, true),
-            Field::new("timestamp", DataType::Utf8, false),
-        ]))
-    }
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| Error::History(format!("set WAL mode: {e}")))?;
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(|e| Error::History(format!("set synchronous: {e}")))?;
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| Error::History(format!("enable foreign keys: {e}")))?;
 
-    async fn ensure_table(&self) -> Result<()> {
-        let tables = self
-            .db
-            .table_names()
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("list tables failed: {e}")))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS events (
+                event_id    TEXT PRIMARY KEY,
+                memory_id   TEXT NOT NULL,
+                event_type  TEXT NOT NULL CHECK(event_type IN ('add', 'update', 'delete')),
+                old_content TEXT,
+                new_content TEXT,
+                created_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_memory_id  ON events(memory_id);
+            CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);",
+        )
+        .map_err(|e| Error::History(format!("migrate schema: {e}")))?;
 
-        if !tables.contains(&self.table_name) {
-            self.db
-                .create_empty_table(&self.table_name, Self::schema())
-                .execute()
-                .await
-                .map_err(|e| Error::VectorStore(format!("create history table failed: {e}")))?;
-            tracing::info!(table = %self.table_name, "created history table");
-        }
-        Ok(())
-    }
+        tracing::info!(path = %path.display(), "history store opened");
 
-    async fn get_table(&self) -> Result<lancedb::Table> {
-        self.db
-            .open_table(&self.table_name)
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("open history table failed: {e}")))
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 
     /// Record a memory lifecycle event.
     ///
     /// # Errors
     ///
-    /// Returns an error if writing fails.
+    /// Returns an error if the insert fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
     pub async fn record(
         &self,
         memory_id: Uuid,
@@ -102,134 +88,118 @@ impl HistoryStore {
             timestamp: Utc::now(),
         };
 
-        let schema = Self::schema();
-        let event_type_str = match event_type {
-            EventType::Add => "add",
-            EventType::Update => "update",
-            EventType::Delete => "delete",
-        };
-
-        let col_event_id: Arc<dyn Array> = Arc::new(StringArray::from(vec![event.id.to_string()]));
-        let col_memory_id: Arc<dyn Array> =
-            Arc::new(StringArray::from(vec![event.memory_id.to_string()]));
-        let col_event_type: Arc<dyn Array> =
-            Arc::new(StringArray::from(vec![event_type_str.to_owned()]));
-        let col_old: Arc<dyn Array> = Arc::new(StringArray::from(vec![
-            old_content.unwrap_or_default().to_owned(),
-        ]));
-        let col_new: Arc<dyn Array> = Arc::new(StringArray::from(vec![
-            new_content.unwrap_or_default().to_owned(),
-        ]));
-        let col_ts: Arc<dyn Array> =
-            Arc::new(StringArray::from(vec![event.timestamp.to_rfc3339()]));
-
-        let batch = RecordBatch::try_new(
-            Arc::clone(&schema),
-            vec![
-                col_event_id,
-                col_memory_id,
-                col_event_type,
-                col_old,
-                col_new,
-                col_ts,
-            ],
-        )
-        .map_err(|e| Error::VectorStore(format!("history batch error: {e}")))?;
-
-        let reader: Box<dyn arrow_array::RecordBatchReader + Send> =
-            Box::new(RecordBatchIterator::new(vec![Ok(batch)], schema));
-        let table = self.get_table().await?;
-        table
-            .add(reader)
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("record history failed: {e}")))?;
+        let conn = Arc::clone(&self.conn);
+        let e = event.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let conn = conn.lock().expect("history db lock poisoned");
+            conn.execute(
+                "INSERT INTO events (event_id, memory_id, event_type, old_content, new_content, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    e.id.to_string(),
+                    e.memory_id.to_string(),
+                    e.event_type.as_str(),
+                    e.old_content,
+                    e.new_content,
+                    e.timestamp.to_rfc3339(),
+                ],
+            )
+            .map_err(|err| Error::History(format!("insert event: {err}")))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| Error::History(format!("spawn_blocking: {e}")))??;
 
         Ok(event)
     }
 
-    /// Get all history events for a specific memory entry.
+    /// Get all history events for a specific memory entry, ordered by time.
     ///
     /// # Errors
     ///
     /// Returns an error if the query fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
     pub async fn get_history(&self, memory_id: Uuid) -> Result<Vec<MemoryEvent>> {
-        let table = self.get_table().await?;
-        let filter = format!("memory_id = '{memory_id}'");
-        let results = table
-            .query()
-            .only_if(filter)
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("query history failed: {e}")))?;
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().expect("history db lock poisoned");
+            let mut stmt = conn
+                .prepare(
+                    "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
+                     FROM events
+                     WHERE memory_id = ?1
+                     ORDER BY created_at ASC",
+                )
+                .map_err(|e| Error::History(format!("prepare query: {e}")))?;
 
-        let batches: Vec<RecordBatch> = results
-            .try_collect()
-            .await
-            .map_err(|e| Error::VectorStore(format!("collect history failed: {e}")))?;
+            let rows = stmt
+                .query_map(rusqlite::params![memory_id.to_string()], |row| {
+                    Ok(RawEvent {
+                        event_id: row.get(0)?,
+                        memory_id: row.get(1)?,
+                        event_type: row.get(2)?,
+                        old_content: row.get(3)?,
+                        new_content: row.get(4)?,
+                        created_at: row.get(5)?,
+                    })
+                })
+                .map_err(|e| Error::History(format!("query events: {e}")))?;
 
-        let mut events = Vec::new();
-        for batch in &batches {
-            events.extend(Self::batch_to_events(batch));
+            let mut events = Vec::new();
+            for row in rows {
+                let raw = row.map_err(|e| Error::History(format!("read row: {e}")))?;
+                events.push(raw.into_event());
+            }
+            Ok(events)
+        })
+        .await
+        .map_err(|e| Error::History(format!("spawn_blocking: {e}")))?
+    }
+}
+
+impl EventType {
+    /// String representation for `SQLite` storage.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Update => "update",
+            Self::Delete => "delete",
         }
-        events.sort_by_key(|e| e.timestamp);
-        Ok(events)
     }
 
-    fn batch_to_events(batch: &RecordBatch) -> Vec<MemoryEvent> {
-        let n = batch.num_rows();
-        let get_str = |name: &str| -> Option<&StringArray> {
-            batch
-                .column_by_name(name)
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
-        };
-
-        let event_id_col = get_str("event_id");
-        let memory_id_col = get_str("memory_id");
-        let event_type_col = get_str("event_type");
-        let old_content_col = get_str("old_content");
-        let new_content_col = get_str("new_content");
-        let ts_col = get_str("timestamp");
-
-        let mut events = Vec::with_capacity(n);
-        for i in 0..n {
-            let event_id = event_id_col
-                .map(|c| c.value(i))
-                .and_then(|s| Uuid::parse_str(s).ok())
-                .unwrap_or_else(Uuid::new_v4);
-            let memory_id = memory_id_col
-                .map(|c| c.value(i))
-                .and_then(|s| Uuid::parse_str(s).ok())
-                .unwrap_or_else(Uuid::new_v4);
-            let event_type = match event_type_col.map(|c| c.value(i)) {
-                Some("update") => EventType::Update,
-                Some("delete") => EventType::Delete,
-                _ => EventType::Add,
-            };
-            let old_content = old_content_col
-                .filter(|c| !c.is_null(i))
-                .map(|c| c.value(i))
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-            let new_content = new_content_col
-                .filter(|c| !c.is_null(i))
-                .map(|c| c.value(i))
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-            let timestamp = ts_col
-                .map(|c| c.value(i))
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map_or_else(Utc::now, |dt| dt.with_timezone(&Utc));
-
-            events.push(MemoryEvent {
-                id: event_id,
-                memory_id,
-                event_type,
-                old_content,
-                new_content,
-                timestamp,
-            });
+    fn from_str(s: &str) -> Self {
+        match s {
+            "update" => Self::Update,
+            "delete" => Self::Delete,
+            _ => Self::Add,
         }
-        events
+    }
+}
+
+/// Intermediate row type for `SQLite` → `MemoryEvent` conversion.
+struct RawEvent {
+    event_id: String,
+    memory_id: String,
+    event_type: String,
+    old_content: Option<String>,
+    new_content: Option<String>,
+    created_at: String,
+}
+
+impl RawEvent {
+    fn into_event(self) -> MemoryEvent {
+        MemoryEvent {
+            id: Uuid::parse_str(&self.event_id).unwrap_or_else(|_| Uuid::new_v4()),
+            memory_id: Uuid::parse_str(&self.memory_id).unwrap_or_else(|_| Uuid::new_v4()),
+            event_type: EventType::from_str(&self.event_type),
+            old_content: self.old_content,
+            new_content: self.new_content,
+            timestamp: chrono::DateTime::parse_from_rfc3339(&self.created_at)
+                .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
+        }
     }
 }

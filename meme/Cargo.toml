@@ -28,6 +28,7 @@ fastembed = { workspace = true, optional = true }
 toml.workspace = true
 directories.workspace = true
 
+rusqlite.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true

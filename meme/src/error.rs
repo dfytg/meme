@@ -29,6 +29,10 @@ pub enum Error {
     #[error("vector store error: {0}")]
     VectorStore(String),
 
+    /// History store (`SQLite`) operation failed.
+    #[error("history error: {0}")]
+    History(String),
+
     /// Memory entry not found.
     #[error("not found: {id}")]
     NotFound {
