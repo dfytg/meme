@@ -1,7 +1,5 @@
-//! Storage layer — vector store and relational store abstractions.
+//! Storage layer — `LanceDB` vector store with multi-view indexing.
 
-mod relational;
 mod vector;
 
-pub use relational::SqliteStore;
-pub use vector::VectorStore;
+pub use vector::{ConsolidationStats, VectorStore};

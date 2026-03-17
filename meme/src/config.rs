@@ -19,8 +19,6 @@ pub struct Config {
     pub store: StoreConfig,
     /// Pipeline parameters.
     pub pipeline: PipelineConfig,
-    /// Cross-session configuration.
-    pub cross: CrossConfig,
 }
 
 impl Config {
@@ -222,41 +220,6 @@ impl Default for PipelineConfig {
             max_reflection_rounds: 2,
             max_build_workers: 16,
             max_retrieval_workers: 8,
-        }
-    }
-}
-
-/// Cross-session configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CrossConfig {
-    /// Path to the `SQLite` database for cross-session data.
-    pub db_path: String,
-    /// Maximum token budget for context injection.
-    pub max_context_tokens: usize,
-    /// Consolidation: entries older than this (days) receive decay.
-    pub consolidation_max_age_days: u32,
-    /// Consolidation: decay factor per period.
-    pub consolidation_decay_factor: f64,
-    /// Consolidation: cosine similarity threshold for merging.
-    pub consolidation_merge_threshold: f64,
-    /// Consolidation: minimum importance before pruning.
-    pub consolidation_min_importance: f64,
-    /// Consolidation: max entries processed per run.
-    pub consolidation_max_entries_per_run: usize,
-}
-
-impl Default for CrossConfig {
-    fn default() -> Self {
-        let base = default_data_dir();
-        Self {
-            db_path: base.join("cross.db").to_string_lossy().into_owned(),
-            max_context_tokens: 4096,
-            consolidation_max_age_days: 90,
-            consolidation_decay_factor: 0.9,
-            consolidation_merge_threshold: 0.95,
-            consolidation_min_importance: 0.05,
-            consolidation_max_entries_per_run: 1000,
         }
     }
 }

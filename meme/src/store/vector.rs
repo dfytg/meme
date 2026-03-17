@@ -607,6 +607,101 @@ impl VectorStore {
         tracing::info!(table = %self.table_name, "cleared vector store");
         Ok(())
     }
+
+    /// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading or deleting entries fails.
+    pub async fn consolidate(
+        &self,
+        max_age_days: u32,
+        decay_factor: f64,
+        merge_threshold: f64,
+        min_importance: f64,
+    ) -> Result<ConsolidationStats> {
+        let pairs = self.get_all_with_vectors().await?;
+        if pairs.is_empty() {
+            return Ok(ConsolidationStats::default());
+        }
+
+        let t0 = std::time::Instant::now();
+        let (entries, vectors): (Vec<MemoryEntry>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
+        let n = entries.len();
+        let mut importance: Vec<f64> = vec![1.0; n];
+        let mut dead: Vec<bool> = vec![false; n];
+
+        let now = chrono::Utc::now();
+        let max_age_secs = f64::from(max_age_days) * 86400.0;
+        let mut decayed = 0usize;
+        for (i, entry) in entries.iter().enumerate() {
+            let Some(ts) = entry.timestamp else { continue };
+            let age = (now - ts).num_seconds() as f64;
+            if age > max_age_secs {
+                importance[i] *= decay_factor;
+                if importance[i] < min_importance {
+                    dead[i] = true;
+                }
+                decayed += 1;
+            }
+        }
+
+        let mut merged = 0usize;
+        let mut ids_to_delete: Vec<String> = Vec::new();
+        for i in 0..n {
+            if dead[i] {
+                continue;
+            }
+            for j in (i + 1)..n {
+                if dead[j] {
+                    continue;
+                }
+                if cosine_similarity(&vectors[i], &vectors[j]) >= merge_threshold {
+                    let loser = if importance[i] >= importance[j] { j } else { i };
+                    dead[loser] = true;
+                    ids_to_delete.push(entries[loser].id.to_string());
+                    merged += 1;
+                }
+            }
+        }
+
+        let mut pruned = 0usize;
+        for (i, entry) in entries.iter().enumerate() {
+            if !dead[i] && importance[i] < min_importance {
+                ids_to_delete.push(entry.id.to_string());
+                pruned += 1;
+            }
+        }
+
+        if !ids_to_delete.is_empty() {
+            self.delete_entries(&ids_to_delete).await?;
+        }
+
+        let stats = ConsolidationStats {
+            scanned: n,
+            decayed,
+            merged,
+            pruned,
+            duration_secs: t0.elapsed().as_secs_f64(),
+        };
+        tracing::info!(?stats, "consolidation complete");
+        Ok(stats)
+    }
+}
+
+/// Statistics from a consolidation run.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+pub struct ConsolidationStats {
+    /// Total entries scanned.
+    pub scanned: usize,
+    /// Entries whose importance was decayed.
+    pub decayed: usize,
+    /// Entries merged (near-duplicates removed).
+    pub merged: usize,
+    /// Entries pruned (below importance threshold).
+    pub pruned: usize,
+    /// Duration in seconds.
+    pub duration_secs: f64,
 }
 
 fn split_delimited(s: &str) -> Vec<String> {
@@ -654,4 +749,19 @@ fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
         }
     }
     vectors
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+    let dot: f64 = a
+        .iter()
+        .zip(b)
+        .map(|(x, y)| f64::from(*x) * f64::from(*y))
+        .sum();
+    let mag_a: f64 = a.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
+    let mag_b: f64 = b.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
+    if mag_a == 0.0 || mag_b == 0.0 {
+        0.0
+    } else {
+        dot / (mag_a * mag_b)
+    }
 }

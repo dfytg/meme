@@ -23,8 +23,6 @@ arrow.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 
-rusqlite.workspace = true
-
 ort = { workspace = true, optional = true }
 tokenizers = { workspace = true, optional = true }
 ndarray = { workspace = true, optional = true }

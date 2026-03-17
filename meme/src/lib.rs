@@ -34,7 +34,6 @@
 #![allow(clippy::cast_possible_truncation)]
 
 pub mod config;
-pub mod cross;
 pub mod embedding;
 pub mod error;
 pub mod llm;

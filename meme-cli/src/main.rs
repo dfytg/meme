@@ -24,10 +24,6 @@ enum Command {
     Ask(commands::ask::AskCmd),
     /// List stored memory entries.
     List(commands::list::ListCmd),
-    /// Manage cross-session memory.
-    Session(commands::session::SessionCmd),
-    /// Manually trigger memory consolidation.
-    Consolidate(commands::consolidate::ConsolidateCmd),
     /// Export memory entries to JSON.
     Export(commands::export::ExportCmd),
     /// Import memory entries from a JSON file.
@@ -51,8 +47,6 @@ fn main() {
         Command::Add(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Ask(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::List(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Session(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Consolidate(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Export(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
         Command::Import(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
     };

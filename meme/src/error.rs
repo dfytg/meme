@@ -22,10 +22,6 @@ pub enum Error {
     #[error("vector store error: {0}")]
     VectorStore(String),
 
-    /// `SQLite` operation failed.
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
-
     /// Configuration error.
     #[error("config error: {0}")]
     Config(String),
@@ -45,10 +41,6 @@ pub enum Error {
     /// TOML deserialization error.
     #[error("toml error: {0}")]
     Toml(#[from] toml::de::Error),
-
-    /// Session not found or invalid state.
-    #[error("session error: {0}")]
-    Session(String),
 
     /// Generic internal error.
     #[error("{0}")]
