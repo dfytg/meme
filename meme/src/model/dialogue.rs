@@ -38,8 +38,9 @@ impl std::fmt::Display for Dialogue {
         if let Some(ts) = self.timestamp {
             write!(
                 f,
-                "[{}] {}: {}",
-                ts.format("%+"),
+                "[{} {}] {}: {}",
+                ts.format("%d %B %Y"),
+                ts.format("%H:%M"),
                 self.speaker,
                 self.content
             )

@@ -15,7 +15,10 @@ pub async fn generate(llm: &LlmClient, query: &str, contexts: &[MemoryEntry]) ->
         return Ok("No relevant information found".to_owned());
     }
 
-    let context_str = prompt::format_contexts(contexts);
+    // Sort contexts chronologically so the LLM sees a coherent timeline.
+    let mut sorted: Vec<&MemoryEntry> = contexts.iter().collect();
+    sorted.sort_by_key(|e| e.timestamp);
+    let context_str = prompt::format_contexts_sorted(&sorted);
     let prompt = prompt::answer(query, &context_str);
 
     let messages = vec![

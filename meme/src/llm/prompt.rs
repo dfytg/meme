@@ -20,8 +20,9 @@ pub fn extraction(dialogue_text: &str, context: &str) -> String {
 [Requirements]
 1. **Complete Coverage**: Generate enough memory entries to ensure ALL information in the dialogues is captured
 2. **Force Disambiguation**: Absolutely PROHIBIT using pronouns (he, she, it, they, this, that) and relative time (yesterday, today, last week, tomorrow)
-3. **Lossless Information**: Each entry's lossless_restatement must be a complete, independent, understandable sentence
-4. **Precise Extraction**:
+3. **Temporal Anchoring**: Convert ALL relative time references to absolute dates using the dialogue timestamps as reference. E.g., if dialogue is dated "25 May 2023" and speaker says "last Sunday", compute the actual date. If dialogue says "next month", compute the actual month.
+4. **Lossless Information**: Each entry's lossless_restatement must be a complete, independent, understandable sentence
+5. **Precise Extraction**:
    - keywords: Core keywords (names, places, entities, topic words)
    - timestamp: Absolute time in ISO 8601 format (if explicit time mentioned in dialogue)
    - location: Specific location name (if mentioned)
@@ -237,6 +238,36 @@ pub fn format_contexts(entries: &[MemoryEntry]) -> String {
             parts.push(format!("Content: {}", e.restatement));
             if let Some(ts) = e.timestamp {
                 parts.push(format!("Time: {}", ts.format("%+")));
+            }
+            if let Some(loc) = &e.location {
+                parts.push(format!("Location: {loc}"));
+            }
+            if !e.persons.is_empty() {
+                parts.push(format!("Persons: {}", e.persons.join(", ")));
+            }
+            if !e.entities.is_empty() {
+                parts.push(format!("Related Entities: {}", e.entities.join(", ")));
+            }
+            if let Some(topic) = &e.topic {
+                parts.push(format!("Topic: {topic}"));
+            }
+            parts.join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Format memory entries as context string, accepting pre-sorted references.
+#[must_use]
+pub fn format_contexts_sorted(entries: &[&MemoryEntry]) -> String {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let mut parts = vec![format!("[Context {}]", i + 1)];
+            parts.push(format!("Content: {}", e.restatement));
+            if let Some(ts) = e.timestamp {
+                parts.push(format!("Time: {}", ts.format("%d %B %Y %H:%M")));
             }
             if let Some(loc) = &e.location {
                 parts.push(format!("Location: {loc}"));
