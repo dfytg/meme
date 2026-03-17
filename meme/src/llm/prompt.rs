@@ -53,6 +53,32 @@ Now process the above dialogues. Return ONLY the JSON object, no other explanati
     )
 }
 
+/// Build a prompt to re-extract structured fields from a single memory text.
+///
+/// Used by `update()` to keep metadata in sync after content changes.
+#[must_use]
+pub fn re_extract(text: &str) -> String {
+    format!(
+        r#"Extract structured metadata from the following memory text.
+
+Text: {text}
+
+Return a JSON object:
+```json
+{{
+  "keywords": ["keyword1", "keyword2"],
+  "timestamp": "YYYY-MM-DDTHH:MM:SSZ or null",
+  "location": "location name or null",
+  "persons": ["name1", "name2"],
+  "entities": ["entity1", "entity2"],
+  "topic": "topic phrase or null"
+}}
+```
+
+Return ONLY the JSON object."#
+    )
+}
+
 /// Build the previous-window context string for extraction.
 #[must_use]
 pub fn extraction_context(previous_entries: &[MemoryEntry]) -> String {

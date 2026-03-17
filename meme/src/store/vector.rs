@@ -481,9 +481,8 @@ impl VectorStore {
                     .map_err(|e| Error::VectorStore(format!("FTS collect failed: {e}")))?;
                 let mut entries: Vec<MemoryEntry> =
                     batches.iter().flat_map(Self::batch_to_entries).collect();
-                if let Some(clause) = &scope_clause {
+                if scope_clause.is_some() {
                     entries.retain(|e| scope_matches(e, scope));
-                    let _ = clause;
                 }
                 return Ok(entries);
             }

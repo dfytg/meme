@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use futures::future;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -168,7 +169,8 @@ impl Meme {
 
     /// Update an existing memory entry's content.
     ///
-    /// Re-embeds the new content and replaces the old entry.
+    /// Re-embeds the new content, re-extracts structured metadata via LLM,
+    /// and replaces the old entry.
     ///
     /// # Errors
     ///
@@ -182,6 +184,7 @@ impl Meme {
 
         let mut updated = existing.clone();
         updated.restatement = new_content.to_owned();
+        self.re_extract_metadata(&mut updated).await;
 
         let vec = self.embedder.encode_query(new_content).await?;
         self.store.update_entry(&updated, &vec).await?;
@@ -198,6 +201,62 @@ impl Meme {
             tracing::warn!(memory_id = %id, error = %e, "history record failed");
         }
         Ok(())
+    }
+
+    /// Re-extract structured metadata (keywords, persons, entities, etc.) from
+    /// an entry's restatement via a lightweight LLM call.
+    async fn re_extract_metadata(&self, entry: &mut MemoryEntry) {
+        let prompt = llm::prompt::re_extract(&entry.restatement);
+        let messages = vec![
+            llm::Message::system("Extract structured metadata. Output valid JSON only."),
+            llm::Message::user(prompt),
+        ];
+        let opts = llm::ChatOptions {
+            temperature: 0.0,
+            json_mode: true,
+        };
+        let Ok(response) = self.llm.chat(&messages, &opts).await else {
+            tracing::warn!("metadata re-extraction LLM call failed, keeping existing fields");
+            return;
+        };
+        let Ok(data) = llm::extract_json_from_text(&response) else {
+            tracing::warn!("metadata re-extraction parse failed, keeping existing fields");
+            return;
+        };
+
+        if let Some(kw) = data["keywords"].as_array() {
+            entry.keywords = kw
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+        if let Some(ps) = data["persons"].as_array() {
+            entry.persons = ps
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+        if let Some(es) = data["entities"].as_array() {
+            entry.entities = es
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+        entry.location = data["location"]
+            .as_str()
+            .filter(|s| *s != "null" && !s.is_empty())
+            .map(String::from);
+        entry.topic = data["topic"]
+            .as_str()
+            .filter(|s| *s != "null" && !s.is_empty())
+            .map(String::from);
+        if let Some(ts) = data["timestamp"]
+            .as_str()
+            .filter(|s| *s != "null" && !s.is_empty())
+            && let Ok(dt) = DateTime::parse_from_rfc3339(ts)
+        {
+            entry.timestamp = Some(dt.with_timezone(&Utc));
+        }
     }
 
     /// Delete a memory entry by ID.
@@ -371,14 +430,14 @@ impl Meme {
 
         let new_facts: Vec<&str> = entries.iter().map(|e| e.restatement.as_str()).collect();
 
-        let mut all_existing: Vec<Vec<MemoryEntry>> = Vec::with_capacity(entries.len());
-        for vec_i in vectors {
-            let similar = self
-                .store
-                .semantic_search(vec_i, similarity_top_k, &self.scope)
-                .await?;
-            all_existing.push(similar);
-        }
+        let ann_futures: Vec<_> = vectors
+            .iter()
+            .map(|vec_i| {
+                self.store
+                    .semantic_search(vec_i, similarity_top_k, &self.scope)
+            })
+            .collect();
+        let all_existing: Vec<Vec<MemoryEntry>> = future::try_join_all(ann_futures).await?;
 
         let mut existing_map: HashMap<Uuid, (usize, String)> = HashMap::new();
         for group in &all_existing {

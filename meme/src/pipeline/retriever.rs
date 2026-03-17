@@ -96,7 +96,7 @@ impl HybridRetriever {
         if !search_queries.iter().any(|q| q == query) {
             search_queries.insert(0, query.to_owned());
         }
-        search_queries.truncate(4);
+        search_queries.truncate(5);
         tracing::info!(count = search_queries.len(), "targeted queries");
 
         // Execute all three search views in parallel.

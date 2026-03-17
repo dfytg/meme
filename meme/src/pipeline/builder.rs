@@ -149,7 +149,7 @@ impl MemoryBuilder {
         );
 
         let entries = self.generate_entries(&window).await?;
-        self.processed_count += window.len();
+        self.processed_count += advance;
         entries.clone_into(&mut self.previous_entries);
 
         tracing::info!(count = entries.len(), "generated memory entries");
