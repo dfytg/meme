@@ -7,7 +7,7 @@
 //! 2. **Online Semantic Synthesis** — deduplication during write
 //! 3. **Intent-Aware Retrieval Planning** — multi-view hybrid retrieval
 //!
-//! Plus a full cross-session memory system for persistent memory across conversations.
+//! Memory is persistent across sessions — the vector store is stored on disk.
 //!
 //! ## Quick Start
 //!
