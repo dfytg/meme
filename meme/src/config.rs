@@ -175,7 +175,7 @@ impl Default for EmbeddingConfig {
         Self {
             provider: EmbeddingProviderKind::Api,
             model: "text-embedding-3-small".to_owned(),
-            dimension: 1024,
+            dimension: 1536,
         }
     }
 }
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(c.llm.max_retries, 3);
         assert!((c.llm.temperature - 0.1).abs() < f32::EPSILON);
         assert_eq!(c.embedding.provider, EmbeddingProviderKind::Api);
-        assert_eq!(c.embedding.dimension, 1024);
+        assert_eq!(c.embedding.dimension, 1536);
         assert_eq!(c.pipeline.window_size, 40);
         assert!(c.pipeline.enable_planning);
         assert!(c.pipeline.enable_reflection);

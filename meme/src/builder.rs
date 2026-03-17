@@ -118,7 +118,7 @@ impl MemeBuilder {
             }
             #[cfg(not(feature = "onnx"))]
             config::EmbeddingProviderKind::Onnx => {
-                return Err(Error::Config(
+                return Err(crate::error::Error::Config(
                     "ONNX provider requires the 'onnx' feature flag".into(),
                 ));
             }

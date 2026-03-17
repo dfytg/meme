@@ -385,11 +385,6 @@ impl VectorStore {
         let reader: Box<dyn arrow_array::RecordBatchReader + Send> =
             Box::new(RecordBatchIterator::new(vec![Ok(batch)], schema));
         let table = self.get_table().await?;
-        let was_empty = table
-            .count_rows(None)
-            .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
-            == 0;
 
         table
             .add(reader)
@@ -397,9 +392,7 @@ impl VectorStore {
             .await
             .map_err(|e| Error::VectorStore(format!("add entries failed: {e}")))?;
 
-        if was_empty {
-            self.ensure_fts_index(&table).await;
-        }
+        self.ensure_fts_index(&table).await;
 
         tracing::info!(count = n, "added memory entries");
         Ok(())
@@ -787,6 +780,7 @@ impl VectorStore {
 
     /// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
     ///
+    /// Operates within the given `scope` to respect multi-tenant isolation.
     /// Uses ANN search per entry to find near-duplicates (O(n·k) instead of O(n²)).
     ///
     /// # Errors
@@ -798,6 +792,7 @@ impl VectorStore {
         decay_factor: f64,
         merge_threshold: f64,
         min_importance: f64,
+        scope: &Scope,
     ) -> Result<ConsolidationStats> {
         let pairs = self.get_all_with_vectors().await?;
         if pairs.is_empty() {
@@ -828,7 +823,6 @@ impl VectorStore {
 
         // ANN-based near-duplicate detection: batch parallel neighbor queries.
         let merge_k = 5;
-        let no_scope = Scope::default();
         let mut merged = 0usize;
         let mut ids_to_delete: Vec<String> = Vec::new();
 
@@ -841,12 +835,11 @@ impl VectorStore {
         let max_ann_workers = 8;
         let semaphore = tokio::sync::Semaphore::new(max_ann_workers);
         let vectors_ref = &vectors;
-        let no_scope_ref = &no_scope;
         let ann_futures = live_indices.iter().map(|&i| {
             let sem = &semaphore;
             async move {
                 let _permit = sem.acquire().await;
-                self.semantic_search(&vectors_ref[i], merge_k, no_scope_ref)
+                self.semantic_search(&vectors_ref[i], merge_k, scope)
                     .await
                     .map(|neighbors| (i, neighbors))
             }

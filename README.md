@@ -139,7 +139,7 @@ use meme::config::{Config, LlmConfig, EmbeddingConfig, StoreConfig, PipelineConf
 
 let config = Config {
     llm: LlmConfig { api_key: Some("sk-...".into()), ..Default::default() },
-    embedding: EmbeddingConfig { model: "text-embedding-3-small".into(), dimension: 1024, ..Default::default() },
+    embedding: EmbeddingConfig { model: "text-embedding-3-small".into(), dimension: 1536, ..Default::default() },
     store: StoreConfig { lancedb_path: "/custom/path/lancedb".into(), ..Default::default() },
     pipeline: PipelineConfig { semantic_top_k: 25, enable_reflection: true, ..Default::default() },
 };
