@@ -26,6 +26,7 @@ impl std::fmt::Debug for ContextInjector<'_> {
     }
 }
 
+#[allow(clippy::future_not_send)]
 impl<'a> ContextInjector<'a> {
     /// Create a new context injector.
     pub const fn new(db: &'a SqliteStore, max_tokens: usize) -> Self {

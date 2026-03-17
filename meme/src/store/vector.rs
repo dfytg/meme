@@ -353,7 +353,8 @@ impl VectorStore for LanceDbStore {
         )
         .map_err(|e| Error::VectorStore(format!("record batch error: {e}")))?;
 
-        let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
+        let reader: Box<dyn arrow_array::RecordBatchReader + Send> =
+            Box::new(RecordBatchIterator::new(vec![Ok(batch)], schema));
         let table = self.get_table().await?;
         let was_empty = table
             .count_rows(None)
@@ -362,7 +363,7 @@ impl VectorStore for LanceDbStore {
             == 0;
 
         table
-            .add(Box::new(reader))
+            .add(reader)
             .execute()
             .await
             .map_err(|e| Error::VectorStore(format!("add entries failed: {e}")))?;

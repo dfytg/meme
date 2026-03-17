@@ -48,6 +48,7 @@ impl std::fmt::Debug for CrossOrchestrator {
     }
 }
 
+#[allow(clippy::future_not_send)]
 impl CrossOrchestrator {
     /// Create a new orchestrator without vector store (SQLite-only mode).
     ///
