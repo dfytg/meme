@@ -1,7 +1,6 @@
 //! Vector store — multi-view indexing with `LanceDB`.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
@@ -51,7 +50,6 @@ pub struct VectorStore {
     table_name: String,
     dimension: usize,
     cached_table: tokio::sync::RwLock<Option<lancedb::Table>>,
-    fts_indexed: AtomicBool,
 }
 
 impl std::fmt::Debug for VectorStore {
@@ -81,7 +79,6 @@ impl VectorStore {
             table_name: table_name.to_owned(),
             dimension,
             cached_table: tokio::sync::RwLock::new(None),
-            fts_indexed: AtomicBool::new(false),
         };
         store.ensure_table().await?;
         Ok(store)
@@ -98,7 +95,7 @@ impl VectorStore {
         if tables.contains(&self.table_name) {
             tracing::info!(table = %self.table_name, "opened existing LanceDB table");
             let table = self.get_table().await?;
-            self.ensure_fts_index(&table).await;
+            self.rebuild_fts_index(&table).await;
         } else {
             let schema = self.build_schema();
             self.db
@@ -156,26 +153,25 @@ impl VectorStore {
 
     async fn invalidate_cache(&self) {
         *self.cached_table.write().await = None;
-        self.fts_indexed.store(false, Ordering::Relaxed);
     }
 
-    async fn ensure_fts_index(&self, table: &lancedb::Table) {
-        if self.fts_indexed.load(Ordering::Relaxed) {
-            return;
-        }
+    /// Rebuild the FTS index to include all current data.
+    ///
+    /// LanceDB FTS is snapshot-based — new rows are invisible to keyword search
+    /// until the index is recreated.
+    async fn rebuild_fts_index(&self, table: &lancedb::Table) {
         if let Err(e) = table
             .create_index(
                 &["restatement"],
-                lancedb::index::Index::FTS(lancedb::index::scalar::FtsIndexBuilder::default()),
+                lancedb::index::Index::FTS(
+                    lancedb::index::scalar::FtsIndexBuilder::default(),
+                ),
             )
             .execute()
             .await
         {
-            tracing::debug!(error = %e, "FTS index creation skipped (may already exist)");
-        } else {
-            tracing::info!("FTS index created on restatement column");
+            tracing::debug!(error = %e, "FTS index rebuild skipped");
         }
-        self.fts_indexed.store(true, Ordering::Relaxed);
     }
 
     fn batch_to_entries(batch: &RecordBatch) -> Vec<MemoryEntry> {
@@ -392,7 +388,7 @@ impl VectorStore {
             .await
             .map_err(|e| Error::VectorStore(format!("add entries failed: {e}")))?;
 
-        self.ensure_fts_index(&table).await;
+        self.rebuild_fts_index(&table).await;
 
         tracing::info!(count = n, "added memory entries");
         Ok(())
