@@ -127,8 +127,8 @@ mod raw {
 ///
 /// Returns an error if the file cannot be read or parsed.
 pub fn load_locomo(path: &std::path::Path) -> Result<BenchmarkDataset, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     let entries: Vec<raw::LocomoEntry> =
         serde_json::from_str(&content).map_err(|e| format!("failed to parse LOCOMO JSON: {e}"))?;
 
@@ -175,7 +175,11 @@ fn extract_dialogues(conv: &raw::Conversation) -> Vec<DialogueTurn> {
 
     for key in session_keys {
         let date_key = format!("{key}_date_time");
-        let session_ts = conv.sessions.get(&date_key).and_then(|v| v.as_str()).map(String::from);
+        let session_ts = conv
+            .sessions
+            .get(&date_key)
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         let Some(session_val) = conv.sessions.get(key) else {
             continue;
@@ -196,9 +200,8 @@ fn extract_dialogues(conv: &raw::Conversation) -> Vec<DialogueTurn> {
     dialogues
 }
 
-fn map_category(cat: u8) -> QuestionCategory {
+const fn map_category(cat: u8) -> QuestionCategory {
     match cat {
-        1 => QuestionCategory::SingleHop,
         2 => QuestionCategory::Temporal,
         3 => QuestionCategory::Commonsense,
         4 => QuestionCategory::MultiHop,

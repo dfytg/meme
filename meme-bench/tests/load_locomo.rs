@@ -1,5 +1,6 @@
 //! Integration test: verify that the real LOCOMO dataset can be loaded and parsed.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 #[test]
@@ -17,13 +18,23 @@ fn load_locomo10_dataset() {
     let dataset = meme_bench::dataset::load_locomo(&path).expect("failed to load locomo10.json");
 
     assert_eq!(dataset.name, "LOCOMO");
-    assert_eq!(dataset.scenarios.len(), 10, "LOCOMO should have 10 conversations");
+    assert_eq!(
+        dataset.scenarios.len(),
+        10,
+        "LOCOMO should have 10 conversations"
+    );
 
     let total_dialogues: usize = dataset.scenarios.iter().map(|s| s.dialogues.len()).sum();
     let total_questions: usize = dataset.scenarios.iter().map(|s| s.questions.len()).sum();
 
-    assert!(total_dialogues > 100, "expected >100 dialogues, got {total_dialogues}");
-    assert!(total_questions > 50, "expected >50 questions, got {total_questions}");
+    assert!(
+        total_dialogues > 100,
+        "expected >100 dialogues, got {total_dialogues}"
+    );
+    assert!(
+        total_questions > 50,
+        "expected >50 questions, got {total_questions}"
+    );
 
     println!("LOCOMO dataset loaded successfully:");
     println!("  Scenarios: {}", dataset.scenarios.len());
@@ -38,12 +49,18 @@ fn load_locomo10_dataset() {
             s.dialogues.len(),
             s.questions.len()
         );
-        assert!(!s.dialogues.is_empty(), "scenario {} has no dialogues", s.id);
-        assert!(!s.questions.is_empty(), "scenario {} has no questions", s.id);
+        assert!(
+            !s.dialogues.is_empty(),
+            "scenario {} has no dialogues",
+            s.id
+        );
+        assert!(
+            !s.questions.is_empty(),
+            "scenario {} has no questions",
+            s.id
+        );
     }
 
-    // Verify category distribution
-    use std::collections::HashMap;
     let mut cat_counts: HashMap<String, usize> = HashMap::new();
     for s in &dataset.scenarios {
         for q in &s.questions {
@@ -51,5 +68,8 @@ fn load_locomo10_dataset() {
         }
     }
     println!("  Category distribution: {cat_counts:?}");
-    assert!(cat_counts.len() >= 4, "expected at least 4 question categories");
+    assert!(
+        cat_counts.len() >= 4,
+        "expected at least 4 question categories"
+    );
 }

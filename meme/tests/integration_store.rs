@@ -1,11 +1,11 @@
-//! Integration tests for LanceDB-backed VectorStore.
+//! Integration tests for `LanceDB`-backed `VectorStore`.
 
 use meme::model::{MemoryEntry, MetadataFilter};
 use meme::store::{Scope, VectorStore};
 
 async fn temp_store(dim: usize) -> VectorStore {
     let dir = std::env::temp_dir().join(format!("meme_test_{}", uuid::Uuid::new_v4()));
-    VectorStore::open(dir.to_str().unwrap(), "test_memories", dim)
+    VectorStore::open(dir.to_str().expect("valid temp dir"), "test_memories", dim)
         .await
         .expect("failed to open test store")
 }
@@ -244,7 +244,7 @@ async fn get_all_with_vectors_roundtrip() {
     let store = temp_store(4).await;
     let v = vec![0.1, 0.2, 0.3, 0.4];
     store
-        .add_entries(&[dummy_entry("roundtrip")], &[v.clone()])
+        .add_entries(&[dummy_entry("roundtrip")], std::slice::from_ref(&v))
         .await
         .unwrap();
 

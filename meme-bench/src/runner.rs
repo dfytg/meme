@@ -56,15 +56,12 @@ impl RunCmd {
     /// Returns an error if dataset loading, meme initialization, or evaluation fails.
     pub async fn run(&self) -> anyhow::Result<()> {
         let path = std::path::Path::new(&self.dataset);
-        let dataset = match crate::dataset::load_locomo(path) {
-            Ok(ds) => {
-                println!("Loaded LOCOMO-format dataset");
-                ds
-            }
-            Err(_) => {
-                let content = std::fs::read_to_string(path)?;
-                serde_json::from_str(&content)?
-            }
+        let dataset = if let Ok(ds) = crate::dataset::load_locomo(path) {
+            println!("Loaded LOCOMO-format dataset");
+            ds
+        } else {
+            let content = std::fs::read_to_string(path)?;
+            serde_json::from_str(&content)?
         };
 
         println!("=== meme LOCOMO Benchmark ===");
@@ -190,10 +187,10 @@ impl RunCmd {
             .iter()
             .map(|d| {
                 let mut dial = meme::model::Dialogue::new(&d.speaker, &d.content);
-                if let Some(ts) = &d.timestamp {
-                    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
-                        dial = dial.with_timestamp(dt.with_timezone(&chrono::Utc));
-                    }
+                if let Some(ts) = &d.timestamp
+                    && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts)
+                {
+                    dial = dial.with_timestamp(dt.with_timezone(&chrono::Utc));
                 }
                 dial
             })

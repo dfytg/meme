@@ -62,6 +62,7 @@ pub struct CategoryMetrics {
 /// Follows the LOCOMO/SQuAD methodology:
 /// - Tokenize by whitespace + lowercase + strip punctuation
 /// - Compute precision/recall over token overlap
+#[must_use]
 pub fn token_f1(predicted: &str, reference: &str) -> (f64, f64, f64) {
     let pred_tokens = normalize_tokens(predicted);
     let ref_tokens = normalize_tokens(reference);
@@ -95,17 +96,17 @@ pub fn token_f1(predicted: &str, reference: &str) -> (f64, f64, f64) {
 }
 
 /// Check if predicted answer matches reference (or any acceptable alternative).
+#[must_use]
 pub fn is_exact_match(predicted: &str, reference: &str, alternatives: &[String]) -> bool {
     let norm_pred = normalize_answer(predicted);
-    if norm_pred == normalize_answer(reference) {
-        return true;
-    }
-    alternatives
-        .iter()
-        .any(|alt| norm_pred == normalize_answer(alt))
+    norm_pred == normalize_answer(reference)
+        || alternatives
+            .iter()
+            .any(|alt| norm_pred == normalize_answer(alt))
 }
 
 /// Compute the best F1 among the reference and all acceptable alternatives.
+#[must_use]
 pub fn best_f1(predicted: &str, reference: &str, alternatives: &[String]) -> (f64, f64, f64) {
     let mut best = token_f1(predicted, reference);
     for alt in alternatives {
@@ -118,6 +119,7 @@ pub fn best_f1(predicted: &str, reference: &str, alternatives: &[String]) -> (f6
 }
 
 /// Aggregate individual question results into summary metrics.
+#[must_use]
 pub fn aggregate(results: &[QuestionResult]) -> AggregateMetrics {
     let total = results.len();
     if total == 0 {
@@ -167,7 +169,7 @@ pub fn aggregate(results: &[QuestionResult]) -> AggregateMetrics {
 
 fn normalize_tokens(text: &str) -> Vec<String> {
     text.split_whitespace()
-        .map(|t| normalize_token(t))
+        .map(normalize_token)
         .filter(|t| !t.is_empty() && !is_stopword(t))
         .collect()
 }
@@ -184,7 +186,7 @@ fn normalize_answer(text: &str) -> String {
     normalize_tokens(text).join(" ")
 }
 
-fn count_tokens<'a>(tokens: &'a [String]) -> HashMap<&'a str, usize> {
+fn count_tokens(tokens: &[String]) -> HashMap<&str, usize> {
     let mut counts = HashMap::new();
     for t in tokens {
         *counts.entry(t.as_str()).or_insert(0) += 1;
