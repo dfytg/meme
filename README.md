@@ -15,20 +15,6 @@
 
 meme implements the [SimpleMem](3rdparty/SimpleMem/) three-stage memory pipeline with a production-grade Rust core: (1) **Semantic Structured Compression** extracts lossless, disambiguated memory entries from dialogues via LLM, (2) **Online Semantic Synthesis** deduplicates at write time, and (3) **Intent-Aware Retrieval Planning** combines semantic, lexical (FTS), and structured metadata search with LLM-driven reflection. Memory is stored persistently on disk via LanceDB.
 
-## Crates
-
-| Crate | | Description |
-| --- | --- | --- |
-| **[`meme`](meme/)** | [![crates.io][meme-crate]][meme-crate-url] [![docs.rs][meme-doc]][meme-doc-url] | Core library — pipeline, vector store, embedding, LLM client |
-| **[`meme-cli`](meme-cli/)** | [![crates.io][cli-crate]][cli-crate-url] | CLI tool — add dialogues, ask questions, export memories |
-
-[meme-crate]: https://img.shields.io/crates/v/meme.svg
-[meme-crate-url]: https://crates.io/crates/meme
-[meme-doc]: https://img.shields.io/docsrs/meme.svg
-[meme-doc-url]: https://docs.rs/meme
-[cli-crate]: https://img.shields.io/crates/v/meme-cli.svg
-[cli-crate-url]: https://crates.io/crates/meme-cli
-
 ## Quick Start
 
 ### Install the CLI
