@@ -56,118 +56,12 @@ impl MemoryEntry {
     }
 }
 
-/// LLM-determined action for memory reconciliation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum MemoryAction {
-    /// Insert a new memory.
-    Add {
-        /// The new entry to store.
-        entry: MemoryEntry,
-    },
-    /// Update an existing memory (replace old with new content).
-    Update {
-        /// ID of the existing entry being replaced.
-        old_id: Uuid,
-        /// The updated entry to store.
-        entry: MemoryEntry,
-    },
-    /// Delete an existing memory (contradicted or obsolete).
-    Delete {
-        /// ID of the entry to remove.
-        id: Uuid,
-        /// Why the entry should be removed.
-        reason: String,
-    },
-    /// No change needed — new memory is a duplicate.
-    Noop {
-        /// Why no action is needed.
-        reason: String,
-    },
-}
-
-/// A recorded history event for a single memory entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryEvent {
-    /// Auto-generated event ID.
-    pub id: Uuid,
-    /// The memory entry this event relates to.
-    pub memory_id: Uuid,
-    /// The type of operation performed.
-    pub event_type: EventType,
-    /// Previous content (for updates and deletes).
-    pub old_content: Option<String>,
-    /// New content (for adds and updates).
-    pub new_content: Option<String>,
-    /// Timestamp of the event.
-    pub timestamp: DateTime<Utc>,
-}
-
-/// Type of memory lifecycle event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EventType {
-    /// A new memory was created.
-    Add,
-    /// An existing memory was updated.
-    Update,
-    /// An existing memory was deleted.
-    Delete,
-}
-
-/// Which retrieval path produced a search result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchSource {
-    /// Dense vector similarity search.
-    Semantic,
-    /// BM25 / full-text keyword search.
-    Keyword,
-    /// Metadata (persons, location, time, entities) filter.
-    Structured,
-}
-
-/// A search hit with its relevance score and provenance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchResult {
-    /// The matched memory entry.
-    pub entry: MemoryEntry,
-    /// Relevance score (higher = more relevant).
-    pub score: f32,
-    /// Which retrieval path found this result.
-    pub source: SearchSource,
-}
-
-/// Filter criteria for symbolic (metadata) search.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct MetadataFilter {
-    /// Filter by person names (any match).
-    pub persons: Option<Vec<String>>,
-    /// Filter by location (substring match).
-    pub location: Option<String>,
-    /// Filter by entity names (any match).
-    pub entities: Option<Vec<String>>,
-    /// Filter by timestamp range (inclusive).
-    pub timestamp_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
-}
-
-impl MetadataFilter {
-    /// Returns `true` if no filter criteria are set.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.persons.is_none()
-            && self.location.is_none()
-            && self.entities.is_none()
-            && self.timestamp_range.is_none()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn memory_entry_new_has_uuid() {
+    fn new_has_uuid() {
         let e = MemoryEntry::new("test fact");
         assert_eq!(e.restatement, "test fact");
         assert!(!e.id.is_nil());
@@ -180,57 +74,14 @@ mod tests {
     }
 
     #[test]
-    fn memory_entry_unique_ids() {
+    fn unique_ids() {
         let e1 = MemoryEntry::new("a");
         let e2 = MemoryEntry::new("b");
         assert_ne!(e1.id, e2.id);
     }
 
     #[test]
-    fn metadata_filter_empty_default() {
-        let f = MetadataFilter::default();
-        assert!(f.is_empty());
-    }
-
-    #[test]
-    fn metadata_filter_not_empty_with_persons() {
-        let f = MetadataFilter {
-            persons: Some(vec!["Alice".into()]),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
-    }
-
-    #[test]
-    fn metadata_filter_not_empty_with_location() {
-        let f = MetadataFilter {
-            location: Some("Tokyo".into()),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
-    }
-
-    #[test]
-    fn metadata_filter_not_empty_with_entities() {
-        let f = MetadataFilter {
-            entities: Some(vec!["OpenAI".into()]),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
-    }
-
-    #[test]
-    fn metadata_filter_not_empty_with_timestamp() {
-        let now = Utc::now();
-        let f = MetadataFilter {
-            timestamp_range: Some((now, now)),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
-    }
-
-    #[test]
-    fn memory_entry_serde_roundtrip() {
+    fn serde_roundtrip() {
         let mut e = MemoryEntry::new("Alice met Bob at 2pm");
         e.keywords = vec!["meeting".into(), "Alice".into()];
         e.persons = vec!["Alice".into(), "Bob".into()];

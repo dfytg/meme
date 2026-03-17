@@ -18,6 +18,7 @@ pub struct MemoryBuilder {
     overlap_size: usize,
     step_size: usize,
     max_parallel_workers: usize,
+    custom_extraction_prompt: Option<String>,
     dialogue_buffer: Vec<Dialogue>,
     processed_count: usize,
     previous_entries: Vec<MemoryEntry>,
@@ -52,6 +53,7 @@ impl MemoryBuilder {
             overlap_size: pipeline_cfg.overlap_size,
             step_size,
             max_parallel_workers,
+            custom_extraction_prompt: pipeline_cfg.custom_extraction_prompt.clone(),
             dialogue_buffer: Vec::new(),
             processed_count: 0,
             previous_entries: Vec::new(),
@@ -181,17 +183,19 @@ impl MemoryBuilder {
 
         let llm = Arc::clone(&self.llm);
         let context = prompt::extraction_context(&self.previous_entries);
+        let custom_prompt = self.custom_extraction_prompt.clone();
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel_workers));
 
         let mut handles = Vec::new();
         for (i, window) in windows.into_iter().enumerate() {
             let llm = Arc::clone(&llm);
             let ctx = context.clone();
+            let cp = custom_prompt.clone();
             let sem = Arc::clone(&semaphore);
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await;
                 tracing::info!(window = i + 1, dialogues = window.len(), "worker started");
-                let result = generate_entries_standalone(&llm, &window, &ctx).await;
+                let result = generate_entries_standalone(&llm, &window, &ctx, cp.as_deref()).await;
                 tracing::info!(window = i + 1, "worker finished");
                 result
             }));
@@ -233,7 +237,13 @@ impl MemoryBuilder {
 
     async fn generate_entries(&self, dialogues: &[Dialogue]) -> Result<Vec<MemoryEntry>> {
         let context = prompt::extraction_context(&self.previous_entries);
-        generate_entries_standalone(&self.llm, dialogues, &context).await
+        generate_entries_standalone(
+            &self.llm,
+            dialogues,
+            &context,
+            self.custom_extraction_prompt.as_deref(),
+        )
+        .await
     }
 }
 
@@ -241,13 +251,17 @@ async fn generate_entries_standalone(
     llm: &Arc<LlmClient>,
     dialogues: &[Dialogue],
     context: &str,
+    custom_prompt: Option<&str>,
 ) -> Result<Vec<MemoryEntry>> {
     let dialogue_text: String = dialogues
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n");
-    let prompt = prompt::extraction(&dialogue_text, context);
+    let prompt = custom_prompt.map_or_else(
+        || prompt::extraction(&dialogue_text, context),
+        |cp| format!("{cp}\n\n[Dialogues]\n{dialogue_text}\n\n{context}"),
+    );
 
     let messages = vec![
         Message::system(

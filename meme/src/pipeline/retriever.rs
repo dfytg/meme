@@ -13,8 +13,8 @@ use crate::llm::{
     ChatOptions, CompletenessResponse, LlmClient, Message, MissingQueriesResponse, QueryPlan,
     prompt,
 };
-use crate::model::{MemoryEntry, MetadataFilter};
-use crate::store::{Scope, VectorStore};
+use crate::model::{MemoryEntry, MetadataFilter, Scope};
+use crate::store::VectorStore;
 
 /// Hybrid retriever that combines semantic, lexical, and symbolic search
 /// with LLM-driven intent analysis and reflection.

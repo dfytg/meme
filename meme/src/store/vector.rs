@@ -11,36 +11,22 @@ use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::error::{Error, Result};
-use crate::model::{MemoryEntry, MetadataFilter};
+use crate::model::{MemoryEntry, MetadataFilter, Scope};
 
-/// Tenant scope for multi-user / multi-session isolation.
-///
-/// When set, all queries are automatically filtered to only return entries
-/// belonging to the specified user and/or session.
-#[derive(Debug, Clone, Default)]
-pub struct Scope {
-    /// Filter by user identifier.
-    pub user_id: Option<String>,
-    /// Filter by session identifier.
-    pub session_id: Option<String>,
-}
-
-impl Scope {
-    /// Build a SQL WHERE clause fragment for this scope.
-    /// Returns `None` if no scope is set.
-    fn to_where_clause(&self) -> Option<String> {
-        let mut parts = Vec::new();
-        if let Some(uid) = &self.user_id {
-            parts.push(format!("user_id = '{}'", escape_sql_string(uid)));
-        }
-        if let Some(sid) = &self.session_id {
-            parts.push(format!("session_id = '{}'", escape_sql_string(sid)));
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join(" AND "))
-        }
+/// Build a SQL WHERE clause fragment for a [`Scope`].
+/// Returns `None` if no scope is set.
+fn scope_to_where_clause(scope: &Scope) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(uid) = &scope.user_id {
+        parts.push(format!("user_id = '{}'", escape_sql_string(uid)));
+    }
+    if let Some(sid) = &scope.session_id {
+        parts.push(format!("session_id = '{}'", escape_sql_string(sid)));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" AND "))
     }
 }
 
@@ -288,7 +274,7 @@ impl VectorStore {
         }
         let mut q = table.query().nearest_to(query_vec)?;
         q = q.limit(top_k);
-        if let Some(clause) = scope.to_where_clause() {
+        if let Some(clause) = scope_to_where_clause(scope) {
             q = q.only_if(clause);
         }
         self.collect_entries(q.execute().await?).await
@@ -313,7 +299,7 @@ impl VectorStore {
             return Ok(Vec::new());
         }
 
-        let scope_clause = scope.to_where_clause();
+        let scope_clause = scope_to_where_clause(scope);
         let fts_query = keywords.join(" ");
 
         // Try FTS first; fall back to LIKE on failure.
@@ -407,7 +393,7 @@ impl VectorStore {
         }
 
         let mut where_clause = conditions.join(" AND ");
-        if let Some(sc) = scope.to_where_clause() {
+        if let Some(sc) = scope_to_where_clause(scope) {
             where_clause = format!("{where_clause} AND {sc}");
         }
         let stream = table
@@ -427,7 +413,7 @@ impl VectorStore {
     pub async fn get_all(&self, scope: &Scope) -> Result<Vec<MemoryEntry>> {
         let table = self.get_table().await?;
         let mut q = table.query();
-        if let Some(clause) = scope.to_where_clause() {
+        if let Some(clause) = scope_to_where_clause(scope) {
             q = q.only_if(clause);
         }
         self.collect_entries(q.execute().await?).await
@@ -444,7 +430,7 @@ impl VectorStore {
     ) -> Result<Vec<(MemoryEntry, Vec<f32>)>> {
         let table = self.get_table().await?;
         let mut q = table.query();
-        if let Some(clause) = scope.to_where_clause() {
+        if let Some(clause) = scope_to_where_clause(scope) {
             q = q.only_if(clause);
         }
         let batches: Vec<RecordBatch> = q.execute().await?.try_collect().await?;
@@ -519,7 +505,7 @@ impl VectorStore {
     /// Returns an error if the count operation fails.
     pub async fn count(&self, scope: &Scope) -> Result<usize> {
         let table = self.get_table().await?;
-        Ok(table.count_rows(scope.to_where_clause()).await?)
+        Ok(table.count_rows(scope_to_where_clause(scope)).await?)
     }
 
     async fn collect_entries(
@@ -538,7 +524,7 @@ impl VectorStore {
     ///
     /// Returns an error if the delete operation fails.
     pub async fn clear(&self, scope: &Scope) -> Result<()> {
-        if let Some(clause) = scope.to_where_clause() {
+        if let Some(clause) = scope_to_where_clause(scope) {
             let table = self.get_table().await?;
             table.delete(&clause).await?;
             tracing::info!(table = %self.table_name, %clause, "cleared scoped entries");
@@ -876,7 +862,7 @@ mod tests {
     #[test]
     fn scope_empty_no_clause() {
         let s = Scope::default();
-        assert!(s.to_where_clause().is_none());
+        assert!(scope_to_where_clause(&s).is_none());
     }
 
     #[test]
@@ -885,7 +871,7 @@ mod tests {
             user_id: Some("alice".into()),
             session_id: None,
         };
-        let clause = s.to_where_clause().unwrap();
+        let clause = scope_to_where_clause(&s).unwrap();
         assert!(clause.contains("user_id"));
         assert!(clause.contains("alice"));
         assert!(!clause.contains("session_id"));
@@ -897,7 +883,7 @@ mod tests {
             user_id: Some("bob".into()),
             session_id: Some("s1".into()),
         };
-        let clause = s.to_where_clause().unwrap();
+        let clause = scope_to_where_clause(&s).unwrap();
         assert!(clause.contains("user_id"));
         assert!(clause.contains("session_id"));
         assert!(clause.contains("AND"));
@@ -950,7 +936,7 @@ mod tests {
             user_id: Some("user_a".into()),
             session_id: None,
         };
-        let clause = s.to_where_clause().unwrap();
+        let clause = scope_to_where_clause(&s).unwrap();
         assert_eq!(clause, "user_id = 'user_a'");
     }
 }

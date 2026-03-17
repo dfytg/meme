@@ -235,8 +235,6 @@ pub struct PipelineConfig {
     pub custom_extraction_prompt: Option<String>,
     /// Custom answer generation prompt (replaces the built-in answer prompt).
     pub custom_answer_prompt: Option<String>,
-    /// Enable LLM-based reranking of search results.
-    pub enable_rerank: bool,
 }
 
 impl Default for PipelineConfig {
@@ -254,7 +252,6 @@ impl Default for PipelineConfig {
             max_retrieval_workers: 8,
             custom_extraction_prompt: None,
             custom_answer_prompt: None,
-            enable_rerank: false,
         }
     }
 }

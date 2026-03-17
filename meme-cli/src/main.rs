@@ -51,22 +51,24 @@ fn main() {
     let cli = Cli::parse();
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
 
-    let result = match cli.command {
-        Command::Init(cmd) => cmd.run().map_err(|e| e.to_string()),
-        Command::Add(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Ask(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Search(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Get(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Update(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Delete(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::History(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::List(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Export(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-        Command::Import(cmd) => rt.block_on(cmd.run()).map_err(|e| e.to_string()),
-    };
-
-    if let Err(e) = result {
+    if let Err(e) = rt.block_on(run(cli.command)) {
         eprintln!("Error: {e}");
         std::process::exit(1);
+    }
+}
+
+async fn run(cmd: Command) -> anyhow::Result<()> {
+    match cmd {
+        Command::Init(c) => c.run(),
+        Command::Add(c) => c.run().await,
+        Command::Ask(c) => c.run().await,
+        Command::Search(c) => c.run().await,
+        Command::Get(c) => c.run().await,
+        Command::Update(c) => c.run().await,
+        Command::Delete(c) => c.run().await,
+        Command::History(c) => c.run().await,
+        Command::List(c) => c.run().await,
+        Command::Export(c) => c.run().await,
+        Command::Import(c) => c.run().await,
     }
 }

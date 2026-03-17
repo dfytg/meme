@@ -4,4 +4,4 @@ mod history;
 mod vector;
 
 pub use history::HistoryStore;
-pub use vector::{ConsolidationStats, Scope, VectorStore};
+pub use vector::{ConsolidationStats, VectorStore};

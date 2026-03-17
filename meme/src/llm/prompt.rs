@@ -263,34 +263,6 @@ Return ONLY the JSON object."#
     )
 }
 
-/// Build an LLM-based reranking prompt.
-///
-/// Given a query and candidate results, the LLM ranks them by relevance.
-#[must_use]
-pub fn rerank(query: &str, candidates: &[(usize, &str)]) -> String {
-    let mut block = String::new();
-    for (idx, text) in candidates {
-        let _ = writeln!(block, "[{idx}] {text}");
-    }
-    format!(
-        r#"Rank the following memory entries by relevance to the query. Return the indices in order from most to least relevant.
-
-Query: {query}
-
-Candidates:
-{block}
-Return a JSON object:
-```json
-{{
-  "ranked_indices": [2, 0, 1, 3]
-}}
-```
-
-Only include indices of entries that are actually relevant. Omit irrelevant entries.
-Return ONLY the JSON object."#
-    )
-}
-
 /// Format memory entries as context string for answer generation.
 #[must_use]
 pub fn format_contexts(entries: &[&MemoryEntry]) -> String {

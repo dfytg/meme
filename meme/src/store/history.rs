@@ -11,8 +11,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
-use crate::model::{EventType, MemoryEvent};
-use crate::store::Scope;
+use crate::model::{EventType, MemoryEvent, Scope};
 
 /// Persistent store for memory lifecycle events backed by `SQLite`.
 pub struct HistoryStore {
@@ -155,26 +154,6 @@ impl HistoryStore {
     }
 }
 
-impl EventType {
-    /// String representation for `SQLite` storage.
-    #[must_use]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Add => "add",
-            Self::Update => "update",
-            Self::Delete => "delete",
-        }
-    }
-
-    fn parse_db(s: &str) -> Self {
-        match s {
-            "update" => Self::Update,
-            "delete" => Self::Delete,
-            _ => Self::Add,
-        }
-    }
-}
-
 /// Intermediate row type for `SQLite` → `MemoryEvent` conversion.
 struct RawEvent {
     event_id: String,
@@ -190,7 +169,7 @@ impl RawEvent {
         MemoryEvent {
             id: Uuid::parse_str(&self.event_id).unwrap_or_else(|_| Uuid::new_v4()),
             memory_id: Uuid::parse_str(&self.memory_id).unwrap_or_else(|_| Uuid::new_v4()),
-            event_type: EventType::parse_db(&self.event_type),
+            event_type: EventType::from_db_str(&self.event_type),
             old_content: self.old_content,
             new_content: self.new_content,
             timestamp: chrono::DateTime::parse_from_rfc3339(&self.created_at)

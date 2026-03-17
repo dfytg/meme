@@ -10,8 +10,9 @@ use crate::error::Result;
 use crate::facade::Meme;
 use crate::http;
 use crate::llm::LlmClient;
+use crate::model::Scope;
 use crate::pipeline::{HybridRetriever, MemoryBuilder};
-use crate::store::{HistoryStore, Scope, VectorStore};
+use crate::store::{HistoryStore, VectorStore};
 
 /// Builder for constructing a [`Meme`] instance.
 #[derive(Debug, Default)]

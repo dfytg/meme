@@ -32,9 +32,6 @@ pub async fn build_meme(user_id: Option<&str>, session_id: Option<&str>) -> anyh
     if let Some(sid) = session_id {
         builder = builder.session_id(sid);
     }
-    let meme = builder
-        .build()
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(meme)
 }
