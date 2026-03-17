@@ -122,18 +122,8 @@ pub struct CrossObservation {
     pub obs_type: ObservationType,
     /// Short title.
     pub title: String,
-    /// Subtitle or brief detail.
-    pub subtitle: Option<String>,
-    /// JSON-encoded list of facts.
-    pub facts_json: Option<String>,
     /// Narrative description.
     pub narrative: Option<String>,
-    /// JSON-encoded list of concepts.
-    pub concepts_json: Option<String>,
-    /// JSON-encoded list of affected files.
-    pub files_json: Option<String>,
-    /// Reference to the vector store entry.
-    pub vector_ref: Option<String>,
 }
 
 /// Summary generated when a session ends.
@@ -159,30 +149,6 @@ pub struct SessionSummary {
     pub vector_ref: Option<String>,
 }
 
-/// Memory entry with cross-session provenance fields.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CrossEntry {
-    /// The base memory entry.
-    #[serde(flatten)]
-    pub entry: MemoryEntry,
-    /// Tenant identifier.
-    pub tenant_id: String,
-    /// Session that produced this entry.
-    pub memory_session_id: Uuid,
-    /// Kind of source evidence.
-    pub source_kind: String,
-    /// Source row ID.
-    pub source_id: Option<i64>,
-    /// Importance score (0.0..=1.0).
-    pub importance: f64,
-    /// When this entry became valid.
-    pub valid_from: Option<DateTime<Utc>>,
-    /// When this entry expires.
-    pub valid_to: Option<DateTime<Utc>>,
-    /// If superseded, the ID of the replacement entry.
-    pub superseded_by: Option<Uuid>,
-}
-
 /// Payload injected at session start with relevant cross-session context.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContextBundle {
@@ -190,8 +156,8 @@ pub struct ContextBundle {
     pub session_summaries: Vec<SessionSummary>,
     /// Timeline observations.
     pub timeline_observations: Vec<CrossObservation>,
-    /// Relevant memory entries.
-    pub memory_entries: Vec<CrossEntry>,
+    /// Relevant memory entries from semantic search.
+    pub memory_entries: Vec<MemoryEntry>,
     /// Estimated total token count.
     pub total_tokens_estimate: usize,
 }
@@ -230,15 +196,11 @@ impl ContextBundle {
         if !self.timeline_observations.is_empty() {
             try_add("Timeline observations:".to_owned());
             for obs in &self.timeline_observations {
-                let detail = obs
-                    .subtitle
-                    .as_deref()
-                    .or(obs.narrative.as_deref())
-                    .unwrap_or("");
-                if detail.is_empty() {
-                    try_add(format!("- {}", obs.title));
-                } else {
-                    try_add(format!("- {}: {detail}", obs.title));
+                match obs.narrative.as_deref() {
+                    Some(detail) if !detail.is_empty() => {
+                        try_add(format!("- {}: {detail}", obs.title));
+                    }
+                    _ => try_add(format!("- {}", obs.title)),
                 }
             }
         }
@@ -246,7 +208,7 @@ impl ContextBundle {
         if !self.memory_entries.is_empty() {
             try_add("Memory entries:".to_owned());
             for e in &self.memory_entries {
-                try_add(format!("- {}", e.entry.restatement));
+                try_add(format!("- {}", e.restatement));
             }
         }
 
@@ -267,19 +229,4 @@ pub struct FinalizationReport {
     pub entries_stored: usize,
     /// Whether consolidation was triggered.
     pub consolidation_triggered: bool,
-}
-
-/// Record of a consolidation run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConsolidationRun {
-    /// Database row ID.
-    pub run_id: Option<i64>,
-    /// Tenant identifier.
-    pub tenant_id: String,
-    /// When the run occurred.
-    pub timestamp: DateTime<Utc>,
-    /// JSON-encoded policy used.
-    pub policy_json: Option<String>,
-    /// JSON-encoded statistics.
-    pub stats_json: Option<String>,
 }

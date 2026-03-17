@@ -7,13 +7,10 @@
 
 use std::collections::HashSet;
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::config::CrossConfig;
-use crate::error::Result;
-use crate::model::{ConsolidationRun, CrossEntry};
-use crate::store::SqliteStore;
+use crate::model::MemoryEntry;
 
 /// Configurable parameters for a single consolidation pass.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -73,9 +70,8 @@ pub struct ConsolidationStats {
 
 /// Consolidation worker that maintains memory quality over time.
 ///
-/// Operates on a list of `CrossEntry` objects passed in by the caller.
-/// The caller is responsible for fetching entries from the vector store
-/// and persisting the changes (importance updates, superseded marks) back.
+/// Pure computation on `MemoryEntry` slices — the caller fetches entries
+/// from the vector store and applies the returned deletions.
 #[derive(Clone, Copy)]
 pub struct ConsolidationWorker {
     policy: ConsolidationPolicy,
@@ -92,11 +88,9 @@ impl std::fmt::Debug for ConsolidationWorker {
 /// Actions computed by consolidation that the caller must persist.
 #[derive(Debug, Default)]
 pub struct ConsolidationActions {
-    /// Entries whose importance should be updated: `(entry_id_str, new_importance)`.
-    pub importance_updates: Vec<(String, f64)>,
-    /// Entries that should be marked as superseded: `(loser_id_str, winner_id_str)`.
+    /// Entries that should be marked as superseded: `(loser_id, winner_id)`.
     pub superseded: Vec<(String, String)>,
-    /// Entries that should be pruned (marked superseded by `"__pruned__"`).
+    /// Entry IDs that should be deleted.
     pub pruned: Vec<String>,
     /// Statistics.
     pub stats: ConsolidationStats,
@@ -109,33 +103,26 @@ impl ConsolidationWorker {
         Self { policy }
     }
 
-    /// Compute consolidation actions for a set of cross-session entries.
+    /// Compute consolidation actions for a set of memory entries.
     ///
-    /// This is a pure computation — it does not write to any store.
-    /// The caller must apply the returned [`ConsolidationActions`] to the vector store.
-    ///
-    /// `vectors` must be parallel to `entries` — `vectors[i]` is the embedding for `entries[i]`.
+    /// Pure computation — does not write to any store.
+    /// `vectors` must be parallel to `entries`.
     #[must_use]
     pub fn compute(
         &self,
-        entries: &mut [CrossEntry],
+        entries: &mut [MemoryEntry],
         vectors: &[Vec<f32>],
     ) -> ConsolidationActions {
         let t0 = std::time::Instant::now();
         let scanned = entries.len();
+        let mut importance: Vec<f64> = vec![1.0; scanned];
+        let mut dead: Vec<bool> = vec![false; scanned];
 
-        let decayed = self.decay_old_entries(entries);
-        let (superseded, merged) = self.merge_similar_entries(entries, vectors);
-        let (pruned_ids, pruned) = self.prune_low_importance(entries);
+        let decayed = self.decay(&entries, &mut importance, &mut dead);
+        let (superseded, merged) = self.merge(entries, vectors, &importance, &mut dead);
+        let (pruned_ids, pruned) = self.prune(entries, &importance, &dead);
 
         let duration_secs = t0.elapsed().as_secs_f64();
-
-        let importance_updates: Vec<(String, f64)> = entries
-            .iter()
-            .filter(|e| e.superseded_by.is_none())
-            .map(|e| (e.entry.id.to_string(), e.importance))
-            .collect();
-
         tracing::info!(
             scanned,
             decayed,
@@ -146,7 +133,6 @@ impl ConsolidationWorker {
         );
 
         ConsolidationActions {
-            importance_updates,
             superseded,
             pruned: pruned_ids,
             stats: ConsolidationStats {
@@ -159,139 +145,83 @@ impl ConsolidationWorker {
         }
     }
 
-    /// Record a consolidation run in `SQLite`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the database insert fails.
-    pub fn record_run(
-        db: &SqliteStore,
-        tenant_id: &str,
-        policy: &ConsolidationPolicy,
-        stats: &ConsolidationStats,
-    ) -> Result<()> {
-        let run = ConsolidationRun {
-            run_id: None,
-            tenant_id: tenant_id.to_owned(),
-            timestamp: Utc::now(),
-            policy_json: serde_json::to_string(policy).ok(),
-            stats_json: serde_json::to_string(stats).ok(),
-        };
-        db.insert_consolidation_run(&run)?;
-        Ok(())
-    }
-
-    fn decay_old_entries(&self, entries: &mut [CrossEntry]) -> usize {
-        let now = Utc::now();
+    fn decay(&self, entries: &[MemoryEntry], importance: &mut [f64], dead: &mut [bool]) -> usize {
+        let now = chrono::Utc::now();
         let max_age_secs = f64::from(self.policy.max_age_days) * 86400.0;
-        let mut decayed = 0;
-
-        for entry in entries.iter_mut() {
-            if entry.superseded_by.is_some() {
-                continue;
+        let mut count = 0;
+        for (i, entry) in entries.iter().enumerate() {
+            let Some(ts) = entry.timestamp else { continue };
+            let age = (now - ts).num_seconds() as f64;
+            if age > max_age_secs {
+                importance[i] *= self.policy.decay_factor;
+                if importance[i] < self.policy.min_importance {
+                    dead[i] = true;
+                }
+                count += 1;
             }
-            let Some(valid_from) = entry.valid_from else {
-                continue;
-            };
-            let age_secs = (now - valid_from).num_seconds() as f64;
-            if age_secs <= max_age_secs {
-                continue;
-            }
-
-            let new_importance = entry.importance * self.policy.decay_factor;
-            tracing::debug!(
-                entry_id = %entry.entry.id,
-                old = entry.importance,
-                new = new_importance,
-                age_days = age_secs / 86400.0,
-                "decayed entry"
-            );
-            entry.importance = new_importance;
-            decayed += 1;
         }
-
-        decayed
+        count
     }
 
-    fn merge_similar_entries(
+    fn merge(
         &self,
-        entries: &mut [CrossEntry],
+        entries: &[MemoryEntry],
         vectors: &[Vec<f32>],
+        importance: &[f64],
+        dead: &mut [bool],
     ) -> (Vec<(String, String)>, usize) {
         let n = entries.len();
         if n < 2 || vectors.len() != n {
             return (Vec::new(), 0);
         }
-
-        let mut merged_ids: HashSet<String> = HashSet::new();
+        let mut merged_ids: HashSet<usize> = HashSet::new();
         let mut superseded = Vec::new();
-        let mut merged_count = 0;
+        let mut count = 0;
 
         for i in 0..n {
-            if entries[i].superseded_by.is_some()
-                || merged_ids.contains(&entries[i].entry.id.to_string())
-            {
+            if dead[i] || merged_ids.contains(&i) {
                 continue;
             }
             for j in (i + 1)..n {
-                if entries[j].superseded_by.is_some()
-                    || merged_ids.contains(&entries[j].entry.id.to_string())
-                {
+                if dead[j] || merged_ids.contains(&j) {
                     continue;
                 }
-
                 let sim = cosine_similarity(&vectors[i], &vectors[j]);
                 if sim < self.policy.merge_similarity_threshold {
                     continue;
                 }
 
-                let (winner_idx, loser_idx) = if entries[i].importance >= entries[j].importance {
-                    (i, j)
-                } else {
+                let (loser, winner) = if importance[i] >= importance[j] {
                     (j, i)
+                } else {
+                    (i, j)
                 };
-
-                let winner_id = entries[winner_idx].entry.id;
-                let loser_id = entries[loser_idx].entry.id;
-
-                entries[loser_idx].superseded_by = Some(winner_id);
-                merged_ids.insert(loser_id.to_string());
-                superseded.push((loser_id.to_string(), winner_id.to_string()));
-                merged_count += 1;
-
-                tracing::debug!(
-                    loser = %loser_id,
-                    winner = %winner_id,
-                    similarity = sim,
-                    "merged entries"
-                );
+                dead[loser] = true;
+                merged_ids.insert(loser);
+                superseded.push((
+                    entries[loser].id.to_string(),
+                    entries[winner].id.to_string(),
+                ));
+                count += 1;
             }
         }
-
-        (superseded, merged_count)
+        (superseded, count)
     }
 
-    fn prune_low_importance(&self, entries: &mut [CrossEntry]) -> (Vec<String>, usize) {
-        let mut pruned_ids = Vec::new();
-
-        for entry in entries.iter_mut() {
-            if entry.superseded_by.is_some() {
-                continue;
+    fn prune(
+        &self,
+        entries: &[MemoryEntry],
+        importance: &[f64],
+        dead: &[bool],
+    ) -> (Vec<String>, usize) {
+        let mut ids = Vec::new();
+        for (i, entry) in entries.iter().enumerate() {
+            if !dead[i] && importance[i] < self.policy.min_importance {
+                ids.push(entry.id.to_string());
             }
-            if entry.importance >= self.policy.min_importance {
-                continue;
-            }
-
-            tracing::debug!(
-                entry_id = %entry.entry.id,
-                importance = entry.importance,
-                "pruned entry"
-            );
-            pruned_ids.push(entry.entry.id.to_string());
         }
-
-        let count = pruned_ids.len();
-        (pruned_ids, count)
+        let count = ids.len();
+        (ids, count)
     }
 }
 

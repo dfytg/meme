@@ -5,11 +5,9 @@
 //! 2. **Observations** from recent sessions
 //! 3. **Semantic search results** against the user's prompt (when provided)
 
-use uuid::Uuid;
-
 use crate::embedding::Embedder;
 use crate::error::Result;
-use crate::model::{ContextBundle, CrossEntry, CrossObservation, SessionSummary};
+use crate::model::{ContextBundle, CrossObservation, MemoryEntry, SessionSummary};
 use crate::store::{SqliteStore, VectorStore};
 
 /// Builds a [`ContextBundle`] from past session data, constrained by a token budget.
@@ -129,10 +127,9 @@ impl<'a> ContextInjector<'a> {
         store: &VectorStore,
         embedder: &Embedder,
         budget_remaining: usize,
-    ) -> Result<Vec<CrossEntry>> {
+    ) -> Result<Vec<MemoryEntry>> {
         let query_vec = embedder.encode_query(prompt).await?;
-        let top_k = 10;
-        let entries = store.semantic_search(&query_vec, top_k).await?;
+        let entries = store.semantic_search(&query_vec, 10).await?;
 
         let mut results = Vec::new();
         let mut tokens_used = 0usize;
@@ -142,17 +139,7 @@ impl<'a> ContextInjector<'a> {
                 break;
             }
             tokens_used += cost;
-            results.push(CrossEntry {
-                entry,
-                tenant_id: "default".to_owned(),
-                memory_session_id: Uuid::nil(),
-                source_kind: "semantic_search".to_owned(),
-                source_id: None,
-                importance: 1.0,
-                valid_from: None,
-                valid_to: None,
-                superseded_by: None,
-            });
+            results.push(entry);
         }
         Ok(results)
     }
@@ -187,15 +174,9 @@ fn text_for_summary(s: &SessionSummary) -> String {
 }
 
 fn text_for_observation(obs: &CrossObservation) -> String {
-    let detail = obs
-        .subtitle
-        .as_deref()
-        .or(obs.narrative.as_deref())
-        .unwrap_or("");
-    if detail.is_empty() {
-        obs.title.clone()
-    } else {
-        format!("{}: {detail}", obs.title)
+    match &obs.narrative {
+        Some(narrative) if !narrative.is_empty() => format!("{}: {narrative}", obs.title),
+        _ => obs.title.clone(),
     }
 }
 

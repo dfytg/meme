@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::error::Result;
 use crate::model::{
-    ConsolidationRun, CrossObservation, EventKind, ObservationType, RedactionLevel, Session,
-    SessionEvent, SessionStatus, SessionSummary,
+    CrossObservation, EventKind, ObservationType, RedactionLevel, Session, SessionEvent,
+    SessionStatus, SessionSummary,
 };
 
 /// `SQLite` store for cross-session metadata (sessions, events, observations, summaries).
@@ -103,23 +103,6 @@ impl SqliteStore {
                 next_steps      TEXT,
                 vector_ref      TEXT,
                 FOREIGN KEY (memory_session_id) REFERENCES sessions(memory_session_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS memory_links (
-                link_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                memory_entry_id TEXT NOT NULL,
-                source_kind     TEXT NOT NULL,
-                source_id       INTEGER NOT NULL,
-                score           REAL NOT NULL,
-                timestamp       TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS consolidation_runs (
-                run_id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id       TEXT NOT NULL,
-                timestamp       TEXT NOT NULL,
-                policy_json     TEXT,
-                stats_json      TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
@@ -295,19 +278,14 @@ impl SqliteStore {
     /// Returns an error if the insert fails.
     pub fn insert_observation(&self, obs: &CrossObservation) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO observations (memory_session_id, timestamp, obs_type, title, subtitle, facts_json, narrative, concepts_json, files_json, vector_ref)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO observations (memory_session_id, timestamp, obs_type, title, narrative)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 obs.memory_session_id.to_string(),
                 obs.timestamp.to_rfc3339(),
                 format!("{:?}", obs.obs_type).to_lowercase(),
                 obs.title,
-                obs.subtitle,
-                obs.facts_json,
                 obs.narrative,
-                obs.concepts_json,
-                obs.files_json,
-                obs.vector_ref,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -320,7 +298,7 @@ impl SqliteStore {
     /// Returns an error if the query fails.
     pub fn get_observations(&self, memory_session_id: &Uuid) -> Result<Vec<CrossObservation>> {
         let mut stmt = self.conn.prepare(
-            "SELECT obs_id, memory_session_id, timestamp, obs_type, title, subtitle, facts_json, narrative, concepts_json, files_json, vector_ref
+            "SELECT obs_id, memory_session_id, timestamp, obs_type, title, narrative
              FROM observations WHERE memory_session_id = ?1 ORDER BY timestamp ASC",
         )?;
         let rows = stmt.query_map(params![memory_session_id.to_string()], |row| {
@@ -330,12 +308,7 @@ impl SqliteStore {
                 timestamp: parse_datetime(&row.get::<_, String>(2)?),
                 obs_type: parse_observation_type(&row.get::<_, String>(3)?),
                 title: row.get(4)?,
-                subtitle: row.get(5)?,
-                facts_json: row.get(6)?,
-                narrative: row.get(7)?,
-                concepts_json: row.get(8)?,
-                files_json: row.get(9)?,
-                vector_ref: row.get(10)?,
+                narrative: row.get(5)?,
             })
         })?;
 
@@ -357,7 +330,7 @@ impl SqliteStore {
         limit: usize,
     ) -> Result<Vec<CrossObservation>> {
         let mut stmt = self.conn.prepare(
-            "SELECT o.obs_id, o.memory_session_id, o.timestamp, o.obs_type, o.title, o.subtitle, o.facts_json, o.narrative, o.concepts_json, o.files_json, o.vector_ref
+            "SELECT o.obs_id, o.memory_session_id, o.timestamp, o.obs_type, o.title, o.narrative
              FROM observations o
              JOIN sessions s ON o.memory_session_id = s.memory_session_id
              WHERE s.project = ?1
@@ -370,12 +343,7 @@ impl SqliteStore {
                 timestamp: parse_datetime(&row.get::<_, String>(2)?),
                 obs_type: parse_observation_type(&row.get::<_, String>(3)?),
                 title: row.get(4)?,
-                subtitle: row.get(5)?,
-                facts_json: row.get(6)?,
-                narrative: row.get(7)?,
-                concepts_json: row.get(8)?,
-                files_json: row.get(9)?,
-                vector_ref: row.get(10)?,
+                narrative: row.get(5)?,
             })
         })?;
 
@@ -441,25 +409,6 @@ impl SqliteStore {
             summaries.push(row?);
         }
         Ok(summaries)
-    }
-
-    /// Record a consolidation run.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the insert fails.
-    pub fn insert_consolidation_run(&self, run: &ConsolidationRun) -> Result<i64> {
-        self.conn.execute(
-            "INSERT INTO consolidation_runs (tenant_id, timestamp, policy_json, stats_json)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                run.tenant_id,
-                run.timestamp.to_rfc3339(),
-                run.policy_json,
-                run.stats_json,
-            ],
-        )?;
-        Ok(self.conn.last_insert_rowid())
     }
 }
 

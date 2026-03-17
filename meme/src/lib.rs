@@ -51,7 +51,7 @@ use embedding::{ApiEmbedding, Embedder};
 use error::Result;
 use llm::LlmClient;
 use model::{Dialogue, MemoryEntry};
-use pipeline::{AnswerGenerator, HybridRetriever, MemoryBuilder};
+use pipeline::{HybridRetriever, MemoryBuilder};
 use store::VectorStore;
 use tokio::sync::Mutex;
 
@@ -60,11 +60,11 @@ use tokio::sync::Mutex;
 /// Wraps the three-stage pipeline (compression, synthesis, retrieval)
 /// behind a simple async API.
 pub struct Meme {
+    llm: Arc<LlmClient>,
     store: Arc<VectorStore>,
     embedder: Arc<Embedder>,
     builder: Mutex<MemoryBuilder>,
     retriever: HybridRetriever,
-    generator: AnswerGenerator,
     config: Config,
     dialogue_counter: AtomicU64,
 }
@@ -153,7 +153,7 @@ impl Meme {
     pub async fn ask(&self, question: &str) -> Result<String> {
         tracing::info!(question, "processing question");
         let contexts = self.retriever.retrieve(question).await?;
-        let answer = self.generator.generate(question, &contexts).await?;
+        let answer = pipeline::generator::generate(&self.llm, question, &contexts).await?;
         tracing::info!(question, answer = answer.as_str(), "answer generated");
         Ok(answer)
     }
@@ -306,16 +306,14 @@ impl MemeBuilder {
             config.pipeline.max_retrieval_workers,
         );
 
-        let generator = AnswerGenerator::new(Arc::clone(&llm));
-
         tracing::info!("meme system initialized");
 
         Ok(Meme {
+            llm,
             store,
             embedder,
             builder: Mutex::new(mem_builder),
             retriever,
-            generator,
             config,
             dialogue_counter: AtomicU64::new(0),
         })

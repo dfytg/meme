@@ -61,12 +61,7 @@ impl ObservationExtractor {
                     timestamp: event.timestamp,
                     obs_type,
                     title: title.to_owned(),
-                    subtitle: None,
-                    facts_json: None,
                     narrative,
-                    concepts_json: None,
-                    files_json: None,
-                    vector_ref: None,
                 })
             })
             .collect()

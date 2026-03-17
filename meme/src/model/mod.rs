@@ -7,6 +7,6 @@ mod session;
 pub use dialogue::Dialogue;
 pub use entry::{MemoryEntry, MetadataFilter};
 pub use session::{
-    ConsolidationRun, ContextBundle, CrossEntry, CrossObservation, EventKind, FinalizationReport,
-    ObservationType, RedactionLevel, Session, SessionEvent, SessionStatus, SessionSummary,
+    ContextBundle, CrossObservation, EventKind, FinalizationReport, ObservationType,
+    RedactionLevel, Session, SessionEvent, SessionStatus, SessionSummary,
 };

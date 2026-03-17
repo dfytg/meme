@@ -11,7 +11,7 @@ use super::injector::ContextInjector;
 use crate::config::{Config, CrossConfig};
 use crate::embedding::Embedder;
 use crate::error::Result;
-use crate::model::{ContextBundle, CrossEntry, FinalizationReport, Session, SessionSummary};
+use crate::model::{ContextBundle, FinalizationReport, MemoryEntry, Session, SessionSummary};
 use crate::store::{SqliteStore, VectorStore};
 
 /// Result of starting a new session.
@@ -270,40 +270,20 @@ impl CrossOrchestrator {
 
         let Some(store) = &self.vector_store else {
             tracing::warn!("consolidation skipped: no vector store configured");
-            let stats = ConsolidationStats::default();
-            ConsolidationWorker::record_run(&self.db, &self.tenant_id, &policy, &stats)?;
-            return Ok(stats);
+            return Ok(ConsolidationStats::default());
         };
 
         let pairs = store.get_all_with_vectors().await?;
         if pairs.is_empty() {
-            let stats = ConsolidationStats::default();
-            ConsolidationWorker::record_run(&self.db, &self.tenant_id, &policy, &stats)?;
-            return Ok(stats);
+            return Ok(ConsolidationStats::default());
         }
 
         let limit = policy.max_entries_per_run;
-        let mut cross_entries: Vec<CrossEntry> = pairs
-            .iter()
-            .take(limit)
-            .map(|(entry, _)| CrossEntry {
-                entry: entry.clone(),
-                tenant_id: self.tenant_id.clone(),
-                memory_session_id: Uuid::new_v4(),
-                source_kind: "vector_store".to_owned(),
-                source_id: None,
-                importance: 1.0,
-                valid_from: entry.timestamp,
-                valid_to: None,
-                superseded_by: None,
-            })
-            .collect();
+        let (mut entries, vectors): (Vec<MemoryEntry>, Vec<Vec<f32>>) =
+            pairs.into_iter().take(limit).unzip();
 
-        let vectors: Vec<Vec<f32>> = pairs.iter().take(limit).map(|(_, v)| v.clone()).collect();
+        let actions = worker.compute(&mut entries, &vectors);
 
-        let actions = worker.compute(&mut cross_entries, &vectors);
-
-        // Apply deletions: remove pruned + superseded entries from the vector store.
         let mut ids_to_delete: Vec<String> = actions.pruned.clone();
         for (loser_id, _) in &actions.superseded {
             ids_to_delete.push(loser_id.clone());
@@ -313,7 +293,6 @@ impl CrossOrchestrator {
             tracing::info!(deleted, "consolidation deletions applied");
         }
 
-        ConsolidationWorker::record_run(&self.db, &self.tenant_id, &policy, &actions.stats)?;
         Ok(actions.stats)
     }
 

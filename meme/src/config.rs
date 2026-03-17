@@ -94,8 +94,6 @@ pub struct LlmConfig {
     pub base_url: String,
     /// Model name.
     pub model: String,
-    /// Enable streaming responses.
-    pub streaming: bool,
     /// Temperature for generation.
     pub temperature: f32,
     /// Maximum retries for API calls.
@@ -108,7 +106,6 @@ impl Default for LlmConfig {
             api_key: None,
             base_url: "https://api.openai.com/v1".to_owned(),
             model: "gpt-4.1-mini".to_owned(),
-            streaming: true,
             temperature: 0.1,
             max_retries: 3,
         }
