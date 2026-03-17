@@ -332,10 +332,7 @@ impl VectorStore {
             .await
             .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
-        Ok(batches
-            .iter()
-            .flat_map(Self::batch_to_entries)
-            .collect())
+        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
     }
 
     /// Keyword search (scans restatement text for keyword matches).
@@ -379,10 +376,7 @@ impl VectorStore {
                     .try_collect()
                     .await
                     .map_err(|e| Error::VectorStore(format!("FTS collect failed: {e}")))?;
-                return Ok(batches
-                    .iter()
-                    .flat_map(Self::batch_to_entries)
-                    .collect());
+                return Ok(batches.iter().flat_map(Self::batch_to_entries).collect());
             }
             Err(e) => {
                 tracing::debug!(error = %e, "FTS search unavailable, falling back to LIKE");
@@ -412,10 +406,7 @@ impl VectorStore {
             .await
             .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
-        Ok(batches
-            .iter()
-            .flat_map(Self::batch_to_entries)
-            .collect())
+        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
     }
 
     /// Structured search by metadata filtering.
@@ -495,10 +486,7 @@ impl VectorStore {
             .await
             .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
-        Ok(batches
-            .iter()
-            .flat_map(Self::batch_to_entries)
-            .collect())
+        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
     }
 
     /// Retrieve all entries.
@@ -519,10 +507,7 @@ impl VectorStore {
             .await
             .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
 
-        Ok(batches
-            .iter()
-            .flat_map(Self::batch_to_entries)
-            .collect())
+        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
     }
 
     /// Retrieve all entries together with their embedding vectors.
