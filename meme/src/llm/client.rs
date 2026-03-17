@@ -137,12 +137,15 @@ impl LlmClient {
                     }
                 },
                 Err(e) => {
+                    if !e.is_retryable() {
+                        return Err(e);
+                    }
                     tracing::warn!(attempt = attempt + 1, error = %e, "LLM API call failed");
                     last_err = Some(e);
                 }
             }
             if attempt + 1 < self.max_retries {
-                let wait = 1u64 << attempt;
+                let wait = 2u64.saturating_pow(attempt).min(30);
                 tokio::time::sleep(Duration::from_secs(wait)).await;
             }
         }
@@ -162,10 +165,13 @@ impl LlmClient {
             match self.call_api(messages, opts).await {
                 Ok(content) => return Ok(content),
                 Err(e) => {
+                    if !e.is_retryable() {
+                        return Err(e);
+                    }
                     tracing::warn!(attempt = attempt + 1, error = %e, "LLM API call failed");
                     last_err = Some(e);
                     if attempt + 1 < self.max_retries {
-                        let wait = 1u64 << attempt;
+                        let wait = 2u64.saturating_pow(attempt).min(30);
                         tokio::time::sleep(Duration::from_secs(wait)).await;
                     }
                 }

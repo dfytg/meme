@@ -32,9 +32,7 @@ impl UpdateCmd {
         let uuid = uuid::Uuid::parse_str(&self.id)
             .map_err(|e| anyhow::anyhow!("invalid UUID '{id}': {e}", id = self.id))?;
 
-        meme.update(uuid, &self.content)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        meme.update(uuid, &self.content).await?;
 
         println!("Updated entry {uuid}");
         Ok(())

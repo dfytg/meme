@@ -109,4 +109,31 @@ impl Error {
             field: Some(field.into()),
         }
     }
+
+    /// Create a vector store error from an Arrow error.
+    pub fn arrow(e: impl std::fmt::Display) -> Self {
+        Self::VectorStore(e.to_string())
+    }
+
+    /// Whether this error is transient and the operation can be retried.
+    #[must_use]
+    pub const fn is_retryable(&self) -> bool {
+        match self {
+            Self::Llm { retryable, .. } => *retryable,
+            Self::JsonParse(_) | Self::Http(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl From<lancedb::Error> for Error {
+    fn from(e: lancedb::Error) -> Self {
+        Self::VectorStore(e.to_string())
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::History(e.to_string())
+    }
 }

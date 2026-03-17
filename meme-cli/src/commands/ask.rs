@@ -26,10 +26,7 @@ impl AskCmd {
     pub async fn run(&self) -> anyhow::Result<()> {
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
-        let answer = meme
-            .ask(&self.question)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let answer = meme.ask(&self.question).await?;
 
         println!("{answer}");
         Ok(())

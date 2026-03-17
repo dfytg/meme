@@ -31,8 +31,7 @@ impl GetCmd {
 
         let entry = meme
             .get(uuid)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .await?
             .ok_or_else(|| anyhow::anyhow!("entry not found: {uuid}"))?;
 
         println!("{}", serde_json::to_string_pretty(&entry)?);

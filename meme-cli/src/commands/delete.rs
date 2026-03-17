@@ -29,9 +29,7 @@ impl DeleteCmd {
         let uuid = uuid::Uuid::parse_str(&self.id)
             .map_err(|e| anyhow::anyhow!("invalid UUID '{id}': {e}", id = self.id))?;
 
-        meme.delete(uuid)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        meme.delete(uuid).await?;
 
         println!("Deleted entry {uuid}");
         Ok(())

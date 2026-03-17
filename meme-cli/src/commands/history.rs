@@ -34,10 +34,7 @@ impl HistoryCmd {
         let uuid = uuid::Uuid::parse_str(&self.id)
             .map_err(|e| anyhow::anyhow!("invalid UUID '{id}': {e}", id = self.id))?;
 
-        let events = meme
-            .history(uuid)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let events = meme.history(uuid).await?;
 
         if self.json {
             println!("{}", serde_json::to_string_pretty(&events)?);
@@ -52,13 +49,7 @@ impl HistoryCmd {
             for (i, event) in events.iter().enumerate() {
                 let truncate = |s: &Option<String>| -> String {
                     s.as_deref()
-                        .map(|v| {
-                            if v.len() > 50 {
-                                format!("{}...", &v[..47])
-                            } else {
-                                v.to_owned()
-                            }
-                        })
+                        .map(|v| super::truncate_str(v, 50))
                         .unwrap_or_default()
                 };
                 table.add_row(vec![

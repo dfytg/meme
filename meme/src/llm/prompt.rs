@@ -293,62 +293,34 @@ Return ONLY the JSON object."#
 
 /// Format memory entries as context string for answer generation.
 #[must_use]
-pub fn format_contexts(entries: &[MemoryEntry]) -> String {
+pub fn format_contexts(entries: &[&MemoryEntry]) -> String {
     entries
         .iter()
         .enumerate()
-        .map(|(i, e)| {
-            let mut parts = vec![format!("[Context {}]", i + 1)];
-            parts.push(format!("Content: {}", e.restatement));
-            if let Some(ts) = e.timestamp {
-                parts.push(format!("Time: {}", ts.format("%+")));
-            }
-            if let Some(loc) = &e.location {
-                parts.push(format!("Location: {loc}"));
-            }
-            if !e.persons.is_empty() {
-                parts.push(format!("Persons: {}", e.persons.join(", ")));
-            }
-            if !e.entities.is_empty() {
-                parts.push(format!("Related Entities: {}", e.entities.join(", ")));
-            }
-            if let Some(topic) = &e.topic {
-                parts.push(format!("Topic: {topic}"));
-            }
-            parts.join("\n")
-        })
+        .map(|(i, e)| format_single_context(i, e))
         .collect::<Vec<_>>()
         .join("\n\n")
 }
 
-/// Format memory entries as context string, accepting pre-sorted references.
-#[must_use]
-pub fn format_contexts_sorted(entries: &[&MemoryEntry]) -> String {
-    entries
-        .iter()
-        .enumerate()
-        .map(|(i, e)| {
-            let mut parts = vec![format!("[Context {}]", i + 1)];
-            parts.push(format!("Content: {}", e.restatement));
-            if let Some(ts) = e.timestamp {
-                parts.push(format!("Time: {}", ts.format("%d %B %Y %H:%M")));
-            }
-            if let Some(loc) = &e.location {
-                parts.push(format!("Location: {loc}"));
-            }
-            if !e.persons.is_empty() {
-                parts.push(format!("Persons: {}", e.persons.join(", ")));
-            }
-            if !e.entities.is_empty() {
-                parts.push(format!("Related Entities: {}", e.entities.join(", ")));
-            }
-            if let Some(topic) = &e.topic {
-                parts.push(format!("Topic: {topic}"));
-            }
-            parts.join("\n")
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+fn format_single_context(i: usize, e: &MemoryEntry) -> String {
+    let mut parts = vec![format!("[Context {}]", i + 1)];
+    parts.push(format!("Content: {}", e.restatement));
+    if let Some(ts) = e.timestamp {
+        parts.push(format!("Time: {}", ts.format("%d %B %Y %H:%M")));
+    }
+    if let Some(loc) = &e.location {
+        parts.push(format!("Location: {loc}"));
+    }
+    if !e.persons.is_empty() {
+        parts.push(format!("Persons: {}", e.persons.join(", ")));
+    }
+    if !e.entities.is_empty() {
+        parts.push(format!("Related Entities: {}", e.entities.join(", ")));
+    }
+    if let Some(topic) = &e.topic {
+        parts.push(format!("Topic: {topic}"));
+    }
+    parts.join("\n")
 }
 
 /// Format entries compactly for reflection/completeness checks.

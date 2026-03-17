@@ -43,12 +43,16 @@ impl Config {
     pub fn load_default() -> Result<Self> {
         let path = default_config_path();
         if path.exists() {
-            Self::from_file(&path)
-        } else {
-            let mut config = Self::default();
-            config.apply_env_overrides();
-            Ok(config)
+            match Self::from_file(&path) {
+                Ok(c) => return Ok(c),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "config parse failed, using defaults");
+                }
+            }
         }
+        let mut config = Self::default();
+        config.apply_env_overrides();
+        Ok(config)
     }
 
     /// Save configuration to a TOML file.
@@ -84,8 +88,8 @@ impl Config {
         if self.embedding.dimension == 0 {
             return Err(Error::Config("embedding dimension must be > 0".into()));
         }
-        if self.llm.max_retries == 0 {
-            return Err(Error::Config("max_retries must be > 0".into()));
+        if self.llm.max_retries == 0 || self.llm.max_retries > 10 {
+            return Err(Error::Config("max_retries must be between 1 and 10".into()));
         }
         Ok(())
     }
@@ -354,6 +358,13 @@ mod tests {
     fn validate_zero_retries() {
         let mut c = Config::default();
         c.llm.max_retries = 0;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_excessive_retries() {
+        let mut c = Config::default();
+        c.llm.max_retries = 11;
         assert!(c.validate().is_err());
     }
 }

@@ -69,10 +69,7 @@ impl VectorStore {
     /// Returns an error if the database cannot be opened.
     pub async fn open(db_path: &str, table_name: &str, dimension: usize) -> Result<Self> {
         std::fs::create_dir_all(db_path)?;
-        let db = lancedb::connect(db_path)
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("failed to connect: {e}")))?;
+        let db = lancedb::connect(db_path).execute().await?;
 
         let store = Self {
             db,
@@ -85,12 +82,7 @@ impl VectorStore {
     }
 
     async fn ensure_table(&self) -> Result<()> {
-        let tables = self
-            .db
-            .table_names()
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("list tables failed: {e}")))?;
+        let tables = self.db.table_names().execute().await?;
 
         if tables.contains(&self.table_name) {
             tracing::info!(table = %self.table_name, "opened existing LanceDB table");
@@ -101,8 +93,7 @@ impl VectorStore {
             self.db
                 .create_empty_table(&self.table_name, schema)
                 .execute()
-                .await
-                .map_err(|e| Error::VectorStore(format!("create table failed: {e}")))?;
+                .await?;
             tracing::info!(table = %self.table_name, "created new LanceDB table");
         }
         Ok(())
@@ -141,12 +132,7 @@ impl VectorStore {
                 return Ok(table.clone());
             }
         }
-        let table = self
-            .db
-            .open_table(&self.table_name)
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("open table failed: {e}")))?;
+        let table = self.db.open_table(&self.table_name).execute().await?;
         *self.cached_table.write().await = Some(table.clone());
         Ok(table)
     }
@@ -173,92 +159,58 @@ impl VectorStore {
     }
 
     fn batch_to_entries(batch: &RecordBatch) -> Vec<MemoryEntry> {
-        let n = batch.num_rows();
-        let mut entries = Vec::with_capacity(n);
-
-        let get_str = |name: &str| -> Option<&StringArray> {
+        let col = |name| -> Option<&StringArray> {
             batch
                 .column_by_name(name)
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>())
         };
+        let id_col = col("entry_id");
+        let rest_col = col("restatement");
+        let kw_col = col("keywords_text");
+        let ts_col = col("timestamp");
+        let loc_col = col("location");
+        let per_col = col("persons_text");
+        let ent_col = col("entities_text");
+        let topic_col = col("topic");
+        let uid_col = col("user_id");
+        let sid_col = col("session_id");
 
-        let id_col = get_str("entry_id");
-        let restatement_col = get_str("restatement");
-        let keywords_col = get_str("keywords_text");
-        let ts_col = get_str("timestamp");
-        let loc_col = get_str("location");
-        let persons_col = get_str("persons_text");
-        let entities_col = get_str("entities_text");
-        let topic_col = get_str("topic");
-        let user_id_col = get_str("user_id");
-        let session_id_col = get_str("session_id");
-
-        for i in 0..n {
-            let id_str = id_col.map(|c| c.value(i)).unwrap_or_default();
-            let restatement = restatement_col
-                .map(|c| c.value(i).to_owned())
-                .unwrap_or_default();
-
-            let keywords = keywords_col
-                .map(|c| split_delimited(c.value(i)))
-                .unwrap_or_default();
-            let persons = persons_col
-                .map(|c| split_delimited(c.value(i)))
-                .unwrap_or_default();
-            let entity_list = entities_col
-                .map(|c| split_delimited(c.value(i)))
-                .unwrap_or_default();
-
-            let timestamp = ts_col
-                .filter(|c| !c.is_null(i))
-                .map(|c| c.value(i))
-                .filter(|s| !s.is_empty())
-                .and_then(|s| {
-                    chrono::DateTime::parse_from_rfc3339(s)
-                        .ok()
-                        .map(|dt| dt.with_timezone(&chrono::Utc))
-                });
-
-            let location = loc_col
-                .filter(|c| !c.is_null(i))
-                .map(|c| c.value(i))
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-
-            let topic = topic_col
-                .filter(|c| !c.is_null(i))
-                .map(|c| c.value(i))
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-
-            let user_id = user_id_col
-                .filter(|c| !c.is_null(i))
-                .map(|c| c.value(i))
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-
-            let session_id = session_id_col
-                .filter(|c| !c.is_null(i))
-                .map(|c| c.value(i))
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-
-            let id = uuid::Uuid::parse_str(id_str).unwrap_or_else(|_| uuid::Uuid::new_v4());
-
-            entries.push(MemoryEntry {
-                id,
-                restatement,
-                keywords,
-                timestamp,
-                location,
-                persons,
-                entities: entity_list,
-                topic,
-                user_id,
-                session_id,
-            });
-        }
-        entries
+        (0..batch.num_rows())
+            .map(|i| {
+                let id_str = str_val(id_col, i);
+                MemoryEntry {
+                    id: uuid::Uuid::parse_str(&id_str).unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                    restatement: str_val(rest_col, i),
+                    keywords: str_val(kw_col, i)
+                        .split("||")
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect(),
+                    timestamp: opt_val(ts_col, i).and_then(|s| {
+                        chrono::DateTime::parse_from_rfc3339(&s)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                    }),
+                    location: opt_val(loc_col, i),
+                    persons: str_val(per_col, i)
+                        .split("||")
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect(),
+                    entities: str_val(ent_col, i)
+                        .split("||")
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect(),
+                    topic: opt_val(topic_col, i),
+                    user_id: opt_val(uid_col, i),
+                    session_id: opt_val(sid_col, i),
+                }
+            })
+            .collect()
     }
 
     /// Add entries with their pre-computed embedding vectors.
@@ -289,102 +241,29 @@ impl VectorStore {
 
         let n = entries.len();
         let schema = self.build_schema();
+        let col = |f: fn(&MemoryEntry) -> String| -> ArrayRef {
+            Arc::new(StringArray::from(entries.iter().map(f).collect::<Vec<_>>()))
+        };
 
-        let entry_ids: ArrayRef = Arc::new(StringArray::from(
-            entries.iter().map(|e| e.id.to_string()).collect::<Vec<_>>(),
-        ));
-        let restatements: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| e.restatement.clone())
-                .collect::<Vec<_>>(),
-        ));
-        let keywords_text: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| join_delimited(&e.keywords))
-                .collect::<Vec<_>>(),
-        ));
-        let timestamps: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| e.timestamp.map(|ts| ts.to_rfc3339()).unwrap_or_default())
-                .collect::<Vec<_>>(),
-        ));
-        let locations: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| e.location.clone().unwrap_or_default())
-                .collect::<Vec<_>>(),
-        ));
-        let persons_text: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| join_delimited(&e.persons))
-                .collect::<Vec<_>>(),
-        ));
-        let entities_text: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| join_delimited(&e.entities))
-                .collect::<Vec<_>>(),
-        ));
-        let topics: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| e.topic.clone().unwrap_or_default())
-                .collect::<Vec<_>>(),
-        ));
-        let user_ids: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| e.user_id.clone().unwrap_or_default())
-                .collect::<Vec<_>>(),
-        ));
-        let session_ids: ArrayRef = Arc::new(StringArray::from(
-            entries
-                .iter()
-                .map(|e| e.session_id.clone().unwrap_or_default())
-                .collect::<Vec<_>>(),
-        ));
+        let columns: Vec<ArrayRef> = vec![
+            col(|e| e.id.to_string()),
+            col(|e| e.restatement.clone()),
+            col(|e| e.keywords.join("||")),
+            col(|e| e.timestamp.map(|ts| ts.to_rfc3339()).unwrap_or_default()),
+            col(|e| e.location.clone().unwrap_or_default()),
+            col(|e| e.persons.join("||")),
+            col(|e| e.entities.join("||")),
+            col(|e| e.topic.clone().unwrap_or_default()),
+            col(|e| e.user_id.clone().unwrap_or_default()),
+            col(|e| e.session_id.clone().unwrap_or_default()),
+            build_vector_column(vectors, self.dimension)?,
+        ];
 
-        let dim = self.dimension;
-        let flat: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
-        let values = Float32Array::from(flat);
-        let fsl_field = Arc::new(Field::new("item", DataType::Float32, true));
-        let vector_array: ArrayRef = Arc::new(
-            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-            FixedSizeListArray::try_new(fsl_field, dim as i32, Arc::new(values), None)
-                .map_err(|e| Error::VectorStore(format!("vector array error: {e}")))?,
-        );
-
-        let batch = RecordBatch::try_new(
-            Arc::clone(&schema),
-            vec![
-                entry_ids,
-                restatements,
-                keywords_text,
-                timestamps,
-                locations,
-                persons_text,
-                entities_text,
-                topics,
-                user_ids,
-                session_ids,
-                vector_array,
-            ],
-        )
-        .map_err(|e| Error::VectorStore(format!("record batch error: {e}")))?;
-
+        let batch = RecordBatch::try_new(Arc::clone(&schema), columns).map_err(Error::arrow)?;
         let reader: Box<dyn arrow_array::RecordBatchReader + Send> =
             Box::new(RecordBatchIterator::new(vec![Ok(batch)], schema));
         let table = self.get_table().await?;
-
-        table
-            .add(reader)
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("add entries failed: {e}")))?;
+        table.add(reader).execute().await?;
 
         self.rebuild_fts_index(&table).await;
 
@@ -404,34 +283,15 @@ impl VectorStore {
         scope: &Scope,
     ) -> Result<Vec<MemoryEntry>> {
         let table = self.get_table().await?;
-        if table
-            .count_rows(None)
-            .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
-            == 0
-        {
+        if table.count_rows(None).await? == 0 {
             return Ok(Vec::new());
         }
-
-        let mut q = table
-            .query()
-            .nearest_to(query_vec)
-            .map_err(|e| Error::VectorStore(format!("nearest_to failed: {e}")))?;
+        let mut q = table.query().nearest_to(query_vec)?;
         q = q.limit(top_k);
         if let Some(clause) = scope.to_where_clause() {
             q = q.only_if(clause);
         }
-        let results = q
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("vector search failed: {e}")))?;
-
-        let batches: Vec<RecordBatch> = results
-            .try_collect()
-            .await
-            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
-
-        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
+        self.collect_entries(q.execute().await?).await
     }
 
     /// Keyword search (scans restatement text for keyword matches).
@@ -448,24 +308,16 @@ impl VectorStore {
         if keywords.is_empty() {
             return Ok(Vec::new());
         }
-
         let table = self.get_table().await?;
-        if table
-            .count_rows(None)
-            .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
-            == 0
-        {
+        if table.count_rows(None).await? == 0 {
             return Ok(Vec::new());
         }
 
         let scope_clause = scope.to_where_clause();
         let fts_query = keywords.join(" ");
 
-        // Try FTS first (uses Tantivy index on restatement column).
-        // Note: FTS + scope filter may not combine well in all LanceDB versions;
-        // on failure we fall back to LIKE which supports scope natively.
-        match table
+        // Try FTS first; fall back to LIKE on failure.
+        if let Ok(stream) = table
             .query()
             .full_text_search(lancedb::index::scalar::FullTextSearchQuery::new(
                 fts_query.clone(),
@@ -474,24 +326,13 @@ impl VectorStore {
             .execute()
             .await
         {
-            Ok(stream) => {
-                let batches: Vec<RecordBatch> = stream
-                    .try_collect()
-                    .await
-                    .map_err(|e| Error::VectorStore(format!("FTS collect failed: {e}")))?;
-                let mut entries: Vec<MemoryEntry> =
-                    batches.iter().flat_map(Self::batch_to_entries).collect();
-                if scope_clause.is_some() {
-                    entries.retain(|e| scope_matches(e, scope));
-                }
-                return Ok(entries);
+            let mut entries = self.collect_entries(stream).await?;
+            if scope_clause.is_some() {
+                entries.retain(|e| scope_matches(e, scope));
             }
-            Err(e) => {
-                tracing::debug!(error = %e, "FTS search unavailable, falling back to LIKE");
-            }
+            return Ok(entries);
         }
 
-        // Fallback to LIKE pattern matching.
         let conditions: Vec<String> = keywords
             .iter()
             .map(|kw| {
@@ -504,20 +345,13 @@ impl VectorStore {
             where_clause = format!("{where_clause} AND {sc}");
         }
 
-        let results = table
+        let stream = table
             .query()
             .only_if(where_clause)
             .limit(top_k)
             .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("keyword search failed: {e}")))?;
-
-        let batches: Vec<RecordBatch> = results
-            .try_collect()
-            .await
-            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
-
-        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
+            .await?;
+        self.collect_entries(stream).await
     }
 
     /// Structured search by metadata filtering.
@@ -534,19 +368,12 @@ impl VectorStore {
         if filter.is_empty() {
             return Ok(Vec::new());
         }
-
         let table = self.get_table().await?;
-        if table
-            .count_rows(None)
-            .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))?
-            == 0
-        {
+        if table.count_rows(None).await? == 0 {
             return Ok(Vec::new());
         }
 
         let mut conditions = Vec::new();
-
         if let Some(persons) = &filter.persons {
             let conds: Vec<String> = persons
                 .iter()
@@ -556,11 +383,9 @@ impl VectorStore {
                 conditions.push(format!("({})", conds.join(" OR ")));
             }
         }
-
         if let Some(location) = &filter.location {
             conditions.push(format!("location LIKE '%{}%'", escape_like(location)));
         }
-
         if let Some(entities) = &filter.entities {
             let conds: Vec<String> = entities
                 .iter()
@@ -570,7 +395,6 @@ impl VectorStore {
                 conditions.push(format!("({})", conds.join(" OR ")));
             }
         }
-
         if let Some((start, end)) = &filter.timestamp_range {
             conditions.push(format!(
                 "timestamp >= '{}' AND timestamp <= '{}'",
@@ -578,7 +402,6 @@ impl VectorStore {
                 end.to_rfc3339()
             ));
         }
-
         if conditions.is_empty() {
             return Ok(Vec::new());
         }
@@ -587,21 +410,13 @@ impl VectorStore {
         if let Some(sc) = scope.to_where_clause() {
             where_clause = format!("{where_clause} AND {sc}");
         }
-
-        let results = table
+        let stream = table
             .query()
             .only_if(where_clause)
             .limit(top_k)
             .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("structured search failed: {e}")))?;
-
-        let batches: Vec<RecordBatch> = results
-            .try_collect()
-            .await
-            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
-
-        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
+            .await?;
+        self.collect_entries(stream).await
     }
 
     /// Retrieve all entries.
@@ -615,17 +430,7 @@ impl VectorStore {
         if let Some(clause) = scope.to_where_clause() {
             q = q.only_if(clause);
         }
-        let results = q
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("get all failed: {e}")))?;
-
-        let batches: Vec<RecordBatch> = results
-            .try_collect()
-            .await
-            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
-
-        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
+        self.collect_entries(q.execute().await?).await
     }
 
     /// Retrieve all entries together with their embedding vectors, filtered by scope.
@@ -642,25 +447,15 @@ impl VectorStore {
         if let Some(clause) = scope.to_where_clause() {
             q = q.only_if(clause);
         }
-        let results = q
-            .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("get all with vectors failed: {e}")))?;
-
-        let batches: Vec<RecordBatch> = results
-            .try_collect()
-            .await
-            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
-
-        let mut pairs = Vec::new();
-        for batch in &batches {
-            let entries = Self::batch_to_entries(batch);
-            let vectors = batch_to_vectors(batch, self.dimension);
-            for (entry, vec) in entries.into_iter().zip(vectors) {
-                pairs.push((entry, vec));
-            }
-        }
-        Ok(pairs)
+        let batches: Vec<RecordBatch> = q.execute().await?.try_collect().await?;
+        Ok(batches
+            .iter()
+            .flat_map(|b| {
+                let entries = Self::batch_to_entries(b);
+                let vectors = batch_to_vectors(b, self.dimension);
+                entries.into_iter().zip(vectors)
+            })
+            .collect())
     }
 
     /// Retrieve a single entry by its UUID.
@@ -670,20 +465,13 @@ impl VectorStore {
     /// Returns an error if the query fails.
     pub async fn get_by_id(&self, id: uuid::Uuid) -> Result<Option<MemoryEntry>> {
         let table = self.get_table().await?;
-        let filter = format!("entry_id = '{id}'");
-        let results = table
+        let stream = table
             .query()
-            .only_if(filter)
+            .only_if(format!("entry_id = '{id}'"))
             .limit(1)
             .execute()
-            .await
-            .map_err(|e| Error::VectorStore(format!("get_by_id failed: {e}")))?;
-
-        let batches: Vec<RecordBatch> = results
-            .try_collect()
-            .await
-            .map_err(|e| Error::VectorStore(format!("collect failed: {e}")))?;
-
+            .await?;
+        let batches: Vec<RecordBatch> = stream.try_collect().await?;
         Ok(batches.iter().flat_map(Self::batch_to_entries).next())
     }
 
@@ -718,12 +506,8 @@ impl VectorStore {
             .map(|id| format!("'{id}'"))
             .collect::<Vec<_>>()
             .join(", ");
-        let predicate = format!("entry_id IN ({ids_csv})");
+        table.delete(&format!("entry_id IN ({ids_csv})")).await?;
         let count = entry_ids.len();
-        table
-            .delete(&predicate)
-            .await
-            .map_err(|e| Error::VectorStore(format!("delete entries failed: {e}")))?;
         tracing::info!(count, "deleted entries from vector store");
         Ok(count)
     }
@@ -735,11 +519,17 @@ impl VectorStore {
     /// Returns an error if the count operation fails.
     pub async fn count(&self, scope: &Scope) -> Result<usize> {
         let table = self.get_table().await?;
-        let filter = scope.to_where_clause();
-        table
-            .count_rows(filter)
-            .await
-            .map_err(|e| Error::VectorStore(format!("count failed: {e}")))
+        Ok(table.count_rows(scope.to_where_clause()).await?)
+    }
+
+    async fn collect_entries(
+        &self,
+        stream: impl futures::Stream<Item = std::result::Result<RecordBatch, lancedb::Error>>
+        + Send
+        + Unpin,
+    ) -> Result<Vec<MemoryEntry>> {
+        let batches: Vec<RecordBatch> = stream.try_collect().await?;
+        Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
     }
 
     /// Clear entries matching the given scope, or all entries if scope is empty.
@@ -750,10 +540,7 @@ impl VectorStore {
     pub async fn clear(&self, scope: &Scope) -> Result<()> {
         if let Some(clause) = scope.to_where_clause() {
             let table = self.get_table().await?;
-            table
-                .delete(&clause)
-                .await
-                .map_err(|e| Error::VectorStore(format!("scoped clear failed: {e}")))?;
+            table.delete(&clause).await?;
             tracing::info!(table = %self.table_name, %clause, "cleared scoped entries");
         } else {
             self.clear_all().await?;
@@ -768,10 +555,7 @@ impl VectorStore {
     /// Returns an error if the table cannot be dropped or recreated.
     pub async fn clear_all(&self) -> Result<()> {
         self.invalidate_cache().await;
-        self.db
-            .drop_table(&self.table_name, &[])
-            .await
-            .map_err(|e| Error::VectorStore(format!("drop table failed: {e}")))?;
+        self.db.drop_table(&self.table_name, &[]).await?;
         self.ensure_table().await?;
         tracing::info!(table = %self.table_name, "cleared entire vector store");
         Ok(())
@@ -925,19 +709,25 @@ fn scope_matches(entry: &MemoryEntry, scope: &Scope) -> bool {
     true
 }
 
-fn split_delimited(s: &str) -> Vec<String> {
-    if s.is_empty() {
-        Vec::new()
-    } else {
-        s.split("||")
-            .map(|p| p.trim().to_owned())
-            .filter(|p| !p.is_empty())
-            .collect()
-    }
+fn str_val(col: Option<&StringArray>, i: usize) -> String {
+    col.map(|c| c.value(i).to_owned()).unwrap_or_default()
 }
 
-fn join_delimited(items: &[String]) -> String {
-    items.join("||")
+fn opt_val(col: Option<&StringArray>, i: usize) -> Option<String> {
+    col.filter(|c| !c.is_null(i))
+        .map(|c| c.value(i))
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+fn build_vector_column(vectors: &[Vec<f32>], dimension: usize) -> Result<ArrayRef> {
+    let flat: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
+    let values = Float32Array::from(flat);
+    let field = Arc::new(Field::new("item", DataType::Float32, true));
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    let array = FixedSizeListArray::try_new(field, dimension as i32, Arc::new(values), None)
+        .map_err(Error::arrow)?;
+    Ok(Arc::new(array))
 }
 
 /// Escape a string for use in SQL `LIKE` patterns.
@@ -1002,45 +792,6 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn split_delimited_empty() {
-        assert!(split_delimited("").is_empty());
-    }
-
-    #[test]
-    fn split_delimited_single() {
-        assert_eq!(split_delimited("hello"), vec!["hello"]);
-    }
-
-    #[test]
-    fn split_delimited_multiple() {
-        assert_eq!(split_delimited("a||b||c"), vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn split_delimited_trims_whitespace() {
-        assert_eq!(split_delimited(" a || b "), vec!["a", "b"]);
-    }
-
-    #[test]
-    fn split_delimited_skips_empty_segments() {
-        assert_eq!(split_delimited("a||||b"), vec!["a", "b"]);
-    }
-
-    #[test]
-    fn join_delimited_roundtrip() {
-        let items = vec!["x".to_owned(), "y".to_owned(), "z".to_owned()];
-        let joined = join_delimited(&items);
-        assert_eq!(joined, "x||y||z");
-        assert_eq!(split_delimited(&joined), vec!["x", "y", "z"]);
-    }
-
-    #[test]
-    fn join_delimited_empty() {
-        let items: Vec<String> = Vec::new();
-        assert_eq!(join_delimited(&items), "");
-    }
 
     #[test]
     fn escape_like_special_chars() {

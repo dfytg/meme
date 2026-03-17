@@ -116,10 +116,13 @@ impl ApiEmbedding {
             match self.call_api(&input).await {
                 Ok(vectors) => return Ok(vectors),
                 Err(e) => {
+                    if !e.is_retryable() {
+                        return Err(e);
+                    }
                     tracing::warn!(attempt = attempt + 1, error = %e, "embedding API call failed");
                     last_err = Some(e);
                     if attempt + 1 < self.max_retries {
-                        let wait = 1u64 << attempt;
+                        let wait = 2u64.saturating_pow(attempt).min(30);
                         tokio::time::sleep(Duration::from_secs(wait)).await;
                     }
                 }

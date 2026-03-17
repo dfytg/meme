@@ -27,7 +27,7 @@ impl ExportCmd {
     pub async fn run(&self) -> anyhow::Result<()> {
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
-        let entries = meme.get_all().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let entries = meme.get_all().await?;
 
         let json = serde_json::to_string_pretty(&entries)?;
 
@@ -74,9 +74,7 @@ impl ImportCmd {
         );
 
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
-        meme.import_entries(&mut entries)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        meme.import_entries(&mut entries).await?;
 
         println!("Imported {count} entries successfully.");
         Ok(())

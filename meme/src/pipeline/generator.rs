@@ -25,7 +25,7 @@ pub async fn generate(
 
     let mut sorted: Vec<&MemoryEntry> = contexts.iter().collect();
     sorted.sort_by_key(|e| e.timestamp);
-    let context_str = prompt::format_contexts_sorted(&sorted);
+    let context_str = prompt::format_contexts(&sorted);
 
     #[allow(clippy::literal_string_with_formatting_args)]
     let user_prompt = pipeline_cfg.custom_answer_prompt.as_ref().map_or_else(

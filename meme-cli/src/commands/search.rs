@@ -35,10 +35,7 @@ impl SearchCmd {
     pub async fn run(&self) -> anyhow::Result<()> {
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
-        let entries = meme
-            .search(&self.query)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let entries = meme.search(&self.query).await?;
 
         let shown: Vec<_> = entries.iter().take(self.limit).collect();
 
@@ -53,11 +50,7 @@ impl SearchCmd {
             table.set_header(vec!["#", "ID", "Restatement", "Persons", "Topic"]);
 
             for (i, entry) in shown.iter().enumerate() {
-                let restatement = if entry.restatement.len() > 60 {
-                    format!("{}...", &entry.restatement[..57])
-                } else {
-                    entry.restatement.clone()
-                };
+                let restatement = super::truncate_str(&entry.restatement, 60);
                 table.add_row(vec![
                     Cell::new(i + 1),
                     Cell::new(&entry.id.to_string()[..8]),

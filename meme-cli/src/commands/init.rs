@@ -27,9 +27,7 @@ impl InitCmd {
         }
 
         let config = Config::default();
-        config
-            .save(&config_path)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        config.save(&config_path)?;
 
         println!("Configuration created at: {}", config_path.display());
         println!();

@@ -1,6 +1,7 @@
 //! Memory history store — tracks all lifecycle events (add/update/delete).
 //!
 //! Uses `SQLite` with WAL mode for ACID-compliant, low-latency persistence.
+//! All queries are scoped by `user_id`/`session_id` for multi-tenant isolation.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -11,6 +12,7 @@ use uuid::Uuid;
 
 use crate::error::{Error, Result};
 use crate::model::{EventType, MemoryEvent};
+use crate::store::Scope;
 
 /// Persistent store for memory lifecycle events backed by `SQLite`.
 pub struct HistoryStore {
@@ -32,16 +34,10 @@ impl HistoryStore {
     ///
     /// Returns an error if the database cannot be opened or migrated.
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| Error::History(format!("open {}: {e}", path.display())))?;
-
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| Error::History(format!("set WAL mode: {e}")))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| Error::History(format!("set synchronous: {e}")))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| Error::History(format!("enable foreign keys: {e}")))?;
-
+        let conn = Connection::open(path)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS events (
                 event_id    TEXT PRIMARY KEY,
@@ -49,21 +45,21 @@ impl HistoryStore {
                 event_type  TEXT NOT NULL CHECK(event_type IN ('add', 'update', 'delete')),
                 old_content TEXT,
                 new_content TEXT,
+                user_id     TEXT,
+                session_id  TEXT,
                 created_at  TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_events_memory_id  ON events(memory_id);
+            CREATE INDEX IF NOT EXISTS idx_events_scope      ON events(user_id, session_id);
             CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);",
-        )
-        .map_err(|e| Error::History(format!("migrate schema: {e}")))?;
-
+        )?;
         tracing::info!(path = %path.display(), "history store opened");
-
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    /// Record a memory lifecycle event.
+    /// Record a memory lifecycle event within a scope.
     ///
     /// # Errors
     ///
@@ -78,6 +74,7 @@ impl HistoryStore {
         event_type: EventType,
         old_content: Option<&str>,
         new_content: Option<&str>,
+        scope: &Scope,
     ) -> Result<MemoryEvent> {
         let event = MemoryEvent {
             id: Uuid::new_v4(),
@@ -90,30 +87,33 @@ impl HistoryStore {
 
         let conn = Arc::clone(&self.conn);
         let e = event.clone();
+        let uid = scope.user_id.clone();
+        let sid = scope.session_id.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = conn.lock().expect("history db lock poisoned");
             conn.execute(
-                "INSERT INTO events (event_id, memory_id, event_type, old_content, new_content, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO events (event_id, memory_id, event_type, old_content, new_content, user_id, session_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 rusqlite::params![
                     e.id.to_string(),
                     e.memory_id.to_string(),
                     e.event_type.as_str(),
                     e.old_content,
                     e.new_content,
+                    uid,
+                    sid,
                     e.timestamp.to_rfc3339(),
                 ],
-            )
-            .map_err(|err| Error::History(format!("insert event: {err}")))?;
+            )?;
             Ok(())
         })
         .await
-        .map_err(|e| Error::History(format!("spawn_blocking: {e}")))??;
+        .map_err(|e| Error::Internal(format!("spawn_blocking: {e}")))??;
 
         Ok(event)
     }
 
-    /// Get all history events for a specific memory entry, ordered by time.
+    /// Get all history events for a memory entry within a scope, ordered by time.
     ///
     /// # Errors
     ///
@@ -122,41 +122,36 @@ impl HistoryStore {
     /// # Panics
     ///
     /// Panics if the internal mutex is poisoned.
-    pub async fn get_history(&self, memory_id: Uuid) -> Result<Vec<MemoryEvent>> {
+    pub async fn get_history(&self, memory_id: Uuid, scope: &Scope) -> Result<Vec<MemoryEvent>> {
         let conn = Arc::clone(&self.conn);
+        let mid = memory_id.to_string();
+        let uid = scope.user_id.clone();
+        let sid = scope.session_id.clone();
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().expect("history db lock poisoned");
-            let mut stmt = conn
-                .prepare(
-                    "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
-                     FROM events
-                     WHERE memory_id = ?1
-                     ORDER BY created_at ASC",
-                )
-                .map_err(|e| Error::History(format!("prepare query: {e}")))?;
-
-            let rows = stmt
-                .query_map(rusqlite::params![memory_id.to_string()], |row| {
-                    Ok(RawEvent {
-                        event_id: row.get(0)?,
-                        memory_id: row.get(1)?,
-                        event_type: row.get(2)?,
-                        old_content: row.get(3)?,
-                        new_content: row.get(4)?,
-                        created_at: row.get(5)?,
-                    })
+            let mut stmt = conn.prepare(
+                "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
+                 FROM events
+                 WHERE memory_id = ?1
+                   AND (user_id IS ?2)
+                   AND (session_id IS ?3)
+                 ORDER BY created_at ASC",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![mid, uid, sid], |row| {
+                Ok(RawEvent {
+                    event_id: row.get(0)?,
+                    memory_id: row.get(1)?,
+                    event_type: row.get(2)?,
+                    old_content: row.get(3)?,
+                    new_content: row.get(4)?,
+                    created_at: row.get(5)?,
                 })
-                .map_err(|e| Error::History(format!("query events: {e}")))?;
-
-            let mut events = Vec::new();
-            for row in rows {
-                let raw = row.map_err(|e| Error::History(format!("read row: {e}")))?;
-                events.push(raw.into_event());
-            }
-            Ok(events)
+            })?;
+            rows.map(|r| Ok(r?.into_event()))
+                .collect::<Result<Vec<_>>>()
         })
         .await
-        .map_err(|e| Error::History(format!("spawn_blocking: {e}")))?
+        .map_err(|e| Error::Internal(format!("spawn_blocking: {e}")))?
     }
 }
 

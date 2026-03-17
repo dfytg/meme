@@ -149,7 +149,13 @@ impl Meme {
         for entry in entries.iter() {
             if let Err(e) = self
                 .history
-                .record(entry.id, EventType::Add, None, Some(&entry.restatement))
+                .record(
+                    entry.id,
+                    EventType::Add,
+                    None,
+                    Some(&entry.restatement),
+                    &self.scope,
+                )
                 .await
             {
                 tracing::warn!(memory_id = %entry.id, error = %e, "history record failed");
@@ -186,7 +192,11 @@ impl Meme {
         updated.restatement = new_content.to_owned();
         self.re_extract_metadata(&mut updated).await;
 
-        let vec = self.embedder.encode_query(new_content).await?;
+        let vecs = self.embedder.encode_documents(&[new_content]).await?;
+        let vec = vecs
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::Embedding("empty embedding".into()))?;
         self.store.update_entry(&updated, &vec).await?;
         if let Err(e) = self
             .history
@@ -195,6 +205,7 @@ impl Meme {
                 EventType::Update,
                 Some(&existing.restatement),
                 Some(new_content),
+                &self.scope,
             )
             .await
         {
@@ -242,7 +253,13 @@ impl Meme {
         self.store.delete_entries(&[id.to_string()]).await?;
         if let Err(e) = self
             .history
-            .record(id, EventType::Delete, Some(&existing.restatement), None)
+            .record(
+                id,
+                EventType::Delete,
+                Some(&existing.restatement),
+                None,
+                &self.scope,
+            )
             .await
         {
             tracing::warn!(memory_id = %id, error = %e, "history record failed");
@@ -268,7 +285,7 @@ impl Meme {
     ///
     /// Returns an error if the history query fails.
     pub async fn history(&self, memory_id: Uuid) -> Result<Vec<MemoryEvent>> {
-        self.history.get_history(memory_id).await
+        self.history.get_history(memory_id, &self.scope).await
     }
 
     /// Ask a question — the core Q&A interface.
@@ -343,12 +360,27 @@ impl Meme {
             return Ok(());
         }
 
-        let (to_add, vecs_add, ids_to_delete) = self.reconcile_memories(&scoped, &vectors).await?;
+        let (to_add, vecs_add, deletes) = self.reconcile_memories(&scoped, &vectors).await?;
 
-        if !ids_to_delete.is_empty() {
-            self.record_history_deletes(&ids_to_delete).await?;
-            self.store.delete_entries(&ids_to_delete).await?;
-            tracing::info!(count = ids_to_delete.len(), "deleted superseded memories");
+        if !deletes.is_empty() {
+            for (uid, old_content) in &deletes {
+                if let Err(e) = self
+                    .history
+                    .record(
+                        *uid,
+                        EventType::Delete,
+                        Some(old_content),
+                        None,
+                        &self.scope,
+                    )
+                    .await
+                {
+                    tracing::warn!(memory_id = %uid, error = %e, "history record failed");
+                }
+            }
+            let ids: Vec<String> = deletes.iter().map(|(uid, _)| uid.to_string()).collect();
+            self.store.delete_entries(&ids).await?;
+            tracing::info!(count = deletes.len(), "deleted superseded memories");
         }
 
         if !to_add.is_empty() {
@@ -362,7 +394,13 @@ impl Meme {
         for entry in entries {
             if let Err(e) = self
                 .history
-                .record(entry.id, event_type, None, Some(&entry.restatement))
+                .record(
+                    entry.id,
+                    event_type,
+                    None,
+                    Some(&entry.restatement),
+                    &self.scope,
+                )
                 .await
             {
                 tracing::warn!(memory_id = %entry.id, error = %e, "history record failed");
@@ -370,30 +408,14 @@ impl Meme {
         }
     }
 
-    async fn record_history_deletes(&self, ids: &[String]) -> Result<()> {
-        for id_str in ids {
-            if let Ok(uid) = Uuid::parse_str(id_str) {
-                let old = self.store.get_by_id(uid).await?.map(|e| e.restatement);
-                if let Err(e) = self
-                    .history
-                    .record(uid, EventType::Delete, old.as_deref(), None)
-                    .await
-                {
-                    tracing::warn!(memory_id = %uid, error = %e, "history record failed");
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Reconcile new entries against existing memories using the LLM.
     ///
-    /// Returns (entries to insert, their vectors, IDs to delete from store).
+    /// Returns `(entries_to_add, their_vectors, entries_to_delete_with_old_content)`.
     async fn reconcile_memories(
         &self,
         entries: &[MemoryEntry],
         vectors: &[Vec<f32>],
-    ) -> Result<(Vec<MemoryEntry>, Vec<Vec<f32>>, Vec<String>)> {
+    ) -> Result<(Vec<MemoryEntry>, Vec<Vec<f32>>, Vec<(Uuid, String)>)> {
         let similarity_top_k = 5;
 
         let new_facts: Vec<&str> = entries.iter().map(|e| e.restatement.as_str()).collect();
@@ -451,7 +473,7 @@ impl Meme {
 
         let mut accepted = Vec::new();
         let mut accepted_vecs = Vec::new();
-        let mut ids_to_delete = Vec::new();
+        let mut deletes: Vec<(Uuid, String)> = Vec::new();
 
         for action in &resp.actions {
             let Some(new_idx) = action.new_index else {
@@ -461,29 +483,26 @@ impl Meme {
                 continue;
             }
 
-            let target_uid = action
-                .existing_index
-                .and_then(|eidx| idx_to_uuid.get(&eidx));
+            let target = action.existing_index.and_then(|eidx| {
+                idx_to_uuid
+                    .get(&eidx)
+                    .and_then(|uid| existing_map.get(uid).map(|(_, text)| (*uid, text.clone())))
+            });
 
             match action.action.as_str() {
                 "update" => {
-                    if let Some(uid) = target_uid {
-                        ids_to_delete.push(uid.to_string());
+                    if let Some(pair) = target {
+                        deletes.push(pair);
                     }
                     accepted.push(entries[new_idx].clone());
                     accepted_vecs.push(vectors[new_idx].clone());
                 }
                 "delete" => {
-                    if let Some(uid) = target_uid {
-                        ids_to_delete.push(uid.to_string());
+                    if let Some(pair) = target {
+                        deletes.push(pair);
                     }
                 }
-                "noop" | "duplicate" => {
-                    tracing::debug!(
-                        new = entries[new_idx].restatement.as_str(),
-                        "skipping duplicate/noop"
-                    );
-                }
+                "noop" | "duplicate" => {}
                 _ => {
                     accepted.push(entries[new_idx].clone());
                     accepted_vecs.push(vectors[new_idx].clone());
@@ -499,9 +518,9 @@ impl Meme {
             }
         }
 
-        ids_to_delete.sort();
-        ids_to_delete.dedup();
+        deletes.sort_by_key(|(uid, _)| *uid);
+        deletes.dedup_by_key(|(uid, _)| *uid);
 
-        Ok((accepted, accepted_vecs, ids_to_delete))
+        Ok((accepted, accepted_vecs, deletes))
     }
 }

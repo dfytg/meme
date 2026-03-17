@@ -287,10 +287,17 @@ async fn history_store_record_and_query() {
     std::fs::create_dir_all(&dir).unwrap();
     let db_path = dir.join("history.db");
     let store = meme::store::HistoryStore::open(&db_path).unwrap();
+    let scope = Scope::default();
 
     let mem_id = uuid::Uuid::new_v4();
     store
-        .record(mem_id, meme::model::EventType::Add, None, Some("hello"))
+        .record(
+            mem_id,
+            meme::model::EventType::Add,
+            None,
+            Some("hello"),
+            &scope,
+        )
         .await
         .unwrap();
     store
@@ -299,6 +306,7 @@ async fn history_store_record_and_query() {
             meme::model::EventType::Update,
             Some("hello"),
             Some("hello world"),
+            &scope,
         )
         .await
         .unwrap();
@@ -308,11 +316,12 @@ async fn history_store_record_and_query() {
             meme::model::EventType::Delete,
             Some("hello world"),
             None,
+            &scope,
         )
         .await
         .unwrap();
 
-    let events = store.get_history(mem_id).await.unwrap();
+    let events = store.get_history(mem_id, &scope).await.unwrap();
     assert_eq!(events.len(), 3);
     assert_eq!(events[0].event_type.as_str(), "add");
     assert_eq!(events[1].event_type.as_str(), "update");
@@ -322,6 +331,6 @@ async fn history_store_record_and_query() {
     assert_eq!(events[1].new_content.as_deref(), Some("hello world"));
 
     let other_id = uuid::Uuid::new_v4();
-    let empty = store.get_history(other_id).await.unwrap();
+    let empty = store.get_history(other_id, &scope).await.unwrap();
     assert!(empty.is_empty());
 }

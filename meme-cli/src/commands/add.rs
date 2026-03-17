@@ -65,14 +65,10 @@ impl AddCmd {
                 })
                 .transpose()?;
 
-            meme.add_dialogue(speaker, content, timestamp)
-                .await
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            meme.add_dialogue(speaker, content, timestamp).await?;
             println!("Added dialogue from {speaker}");
         } else {
-            meme.add(content)
-                .await
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            meme.add(content).await?;
             println!("Added fact");
         }
         Ok(())
@@ -109,10 +105,8 @@ impl AddCmd {
 
         let count = dialogues.len();
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
-        meme.add_dialogues(dialogues)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        meme.finalize().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        meme.add_dialogues(dialogues).await?;
+        meme.finalize().await?;
 
         println!("Imported {count} dialogues from {path}");
         Ok(())
