@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -48,49 +47,36 @@ impl Meme {
         crate::MemeBuilder::new()
     }
 
-    /// Add a single dialogue turn.
+    /// Add dialogues to the memory system.
     ///
-    /// When the internal buffer reaches `window_size`, entries are automatically
-    /// extracted, reconciled against existing memories, and stored.
+    /// Dialogues are buffered and processed through the LLM extraction pipeline
+    /// in windows for optimal token efficiency. When the buffer reaches
+    /// `window_size`, extraction is triggered automatically.
+    ///
+    /// Call [`flush`](Self::flush) after the last batch to ensure all
+    /// buffered dialogues are processed.
     ///
     /// # Errors
     ///
     /// Returns an error if LLM extraction or storage fails.
-    #[tracing::instrument(skip(self, content, timestamp), fields(speaker))]
-    pub async fn add_dialogue(
-        &self,
-        speaker: &str,
-        content: &str,
-        timestamp: Option<DateTime<Utc>>,
-    ) -> Result<()> {
-        let mut dialogue = Dialogue::new(speaker, content);
-        if let Some(ts) = timestamp {
-            dialogue = dialogue.with_timestamp(ts);
+    #[tracing::instrument(skip(self, dialogues), fields(count = dialogues.len()))]
+    pub async fn add(&self, dialogues: &[Dialogue]) -> Result<()> {
+        if dialogues.is_empty() {
+            return Ok(());
         }
-
         let mut builder = self.builder.lock().await;
-        let entries = builder.add_dialogue(dialogue).await?;
+        let entries = builder.add_dialogues(dialogues.to_vec()).await?;
+        drop(builder);
         if !entries.is_empty() {
             self.ingest_entries(&entries).await?;
         }
         Ok(())
     }
 
-    /// Batch add dialogues.
+    /// Flush the dialogue buffer — process any remaining buffered dialogues.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if LLM extraction or storage fails.
-    pub async fn add_dialogues(&self, dialogues: Vec<Dialogue>) -> Result<()> {
-        let mut builder = self.builder.lock().await;
-        let entries = builder.add_dialogues(dialogues).await?;
-        if !entries.is_empty() {
-            self.ingest_entries(&entries).await?;
-        }
-        Ok(())
-    }
-
-    /// Process any remaining dialogues in the buffer.
+    /// Must be called after the last [`add`](Self::add) to ensure no dialogues
+    /// are left unprocessed in the internal buffer.
     ///
     /// # Errors
     ///
@@ -98,22 +84,23 @@ impl Meme {
     pub async fn flush(&self) -> Result<()> {
         let mut builder = self.builder.lock().await;
         let entries = builder.finalize().await?;
+        drop(builder);
         if !entries.is_empty() {
             self.ingest_entries(&entries).await?;
         }
         Ok(())
     }
 
-    /// Add a raw text fact directly (bypasses dialogue windowing).
+    /// Store a fact directly into memory (bypasses dialogue windowing).
     ///
     /// The text is embedded, reconciled against existing memories,
-    /// and stored as a single `MemoryEntry`.
+    /// and stored as a single [`Memory`].
     ///
     /// # Errors
     ///
     /// Returns an error if embedding or storage fails.
     #[tracing::instrument(skip(self))]
-    pub async fn add(&self, content: &str) -> Result<()> {
+    pub async fn put(&self, content: &str) -> Result<()> {
         if content.is_empty() {
             return Err(Error::validation("content must not be empty"));
         }

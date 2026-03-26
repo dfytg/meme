@@ -60,23 +60,7 @@ impl MemoryBuilder {
         }
     }
 
-    /// Add a single dialogue to the buffer.
-    ///
-    /// Returns extracted entries when a full window has been processed.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if LLM extraction fails.
-    #[tracing::instrument(skip(self, dialogue))]
-    pub async fn add_dialogue(&mut self, dialogue: Dialogue) -> Result<Vec<Memory>> {
-        self.dialogue_buffer.push(dialogue);
-        if self.dialogue_buffer.len() >= self.window_size {
-            return self.process_window().await;
-        }
-        Ok(Vec::new())
-    }
-
-    /// Batch add dialogues with automatic window processing.
+    /// Add dialogues to the buffer with automatic window processing.
     ///
     /// For large batches (> 2× window size), uses parallel processing.
     ///

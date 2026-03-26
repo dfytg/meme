@@ -38,7 +38,7 @@ async fn main() -> meme::error::Result<()> {
     ];
 
     let count = dialogues.len();
-    meme.add_dialogues(dialogues).await?;
+    meme.add(&dialogues).await?;
     meme.flush().await?;
 
     println!(

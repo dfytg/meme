@@ -31,9 +31,7 @@ impl Dialogue {
         self.timestamp = Some(ts);
         self
     }
-}
 
-impl Dialogue {
     /// Format this dialogue for inclusion in an LLM extraction prompt.
     ///
     /// Includes timestamp when available for temporal anchoring.

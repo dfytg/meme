@@ -17,19 +17,11 @@ async fn main() -> meme::error::Result<()> {
         .build()
         .await?;
 
-    meme.add_dialogue(
-        "Alice",
-        "I'll be in Tokyo next Monday for the conference.",
-        None,
-    )
-    .await?;
-    meme.add_dialogue("Bob", "Great! Let's meet at Shibuya station at 3pm.", None)
-        .await?;
-    meme.add_dialogue(
-        "Alice",
-        "Sure. I'll bring the Q3 report for Acme Corp.",
-        None,
-    )
+    meme.add(&[
+        meme::Dialogue::new("Alice", "I'll be in Tokyo next Monday for the conference."),
+        meme::Dialogue::new("Bob", "Great! Let's meet at Shibuya station at 3pm."),
+        meme::Dialogue::new("Alice", "Sure. I'll bring the Q3 report for Acme Corp."),
+    ])
     .await?;
     meme.flush().await?;
 

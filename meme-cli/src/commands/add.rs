@@ -4,8 +4,8 @@ use clap::Args;
 
 /// Add a dialogue or raw fact to the memory system.
 ///
-/// Without `--speaker`, stores content as a direct fact (bypasses dialogue windowing).
-/// With `--speaker`, stores as a dialogue turn.
+/// Without `--speaker`, stores content as a direct fact via `put()`.
+/// With `--speaker`, stores as a dialogue turn via `add()` + `flush()`.
 #[derive(Debug, Args)]
 pub struct AddCmd {
     /// Speaker name (omit for direct fact ingestion).
@@ -65,10 +65,15 @@ impl AddCmd {
                 })
                 .transpose()?;
 
-            meme.add_dialogue(speaker, content, timestamp).await?;
+            let mut d = meme::Dialogue::new(speaker, content);
+            if let Some(ts) = timestamp {
+                d = d.with_timestamp(ts);
+            }
+            meme.add(&[d]).await?;
+            meme.flush().await?;
             println!("Added dialogue from {speaker}");
         } else {
-            meme.add(content).await?;
+            meme.put(content).await?;
             println!("Added fact");
         }
         Ok(())
@@ -95,7 +100,7 @@ impl AddCmd {
                     .map(|dt| dt.with_timezone(&chrono::Utc))
             });
 
-            let mut d = meme::model::Dialogue::new(speaker, text);
+            let mut d = meme::Dialogue::new(speaker, text);
             if let Some(ts) = timestamp {
                 d = d.with_timestamp(ts);
             }
@@ -105,7 +110,7 @@ impl AddCmd {
 
         let count = dialogues.len();
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
-        meme.add_dialogues(dialogues).await?;
+        meme.add(&dialogues).await?;
         meme.flush().await?;
 
         println!("Imported {count} dialogues from {path}");

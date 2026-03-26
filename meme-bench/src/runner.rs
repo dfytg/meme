@@ -208,7 +208,7 @@ impl RunCmd {
             })
             .collect();
 
-        meme.add_dialogues(dialogues)
+        meme.add(&dialogues)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         meme.flush().await.map_err(|e| anyhow::anyhow!("{e}"))?;

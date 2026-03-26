@@ -12,7 +12,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use meme::{Meme, MemeBuilder};
+//! use meme::{Dialogue, Meme, MemeBuilder};
 //!
 //! # async fn example() -> meme::error::Result<()> {
 //! let meme = MemeBuilder::new()
@@ -21,12 +21,15 @@
 //!     .build()
 //!     .await?;
 //!
-//! // Dialogue-based ingestion
-//! meme.add_dialogue("Alice", "Let's meet at 2pm tomorrow", None).await?;
+//! // Add a conversation
+//! meme.add(&[
+//!     Dialogue::new("Alice", "Let's meet at 2pm tomorrow"),
+//!     Dialogue::new("Bob", "Sure, see you at Shibuya station"),
+//! ]).await?;
 //! meme.flush().await?;
 //!
-//! // Direct fact ingestion (skips dialogue windowing)
-//! meme.add("Alice prefers coffee over tea").await?;
+//! // Store a fact directly
+//! meme.put("Alice prefers coffee over tea").await?;
 //!
 //! // Search & Q&A
 //! let results = meme.search("Alice meeting").await?;
