@@ -280,7 +280,7 @@ impl VectorStore {
         self.collect_entries(q.execute().await?).await
     }
 
-    /// Keyword search (scans restatement text for keyword matches).
+    /// Keyword search (scans content and keywords columns for matches).
     ///
     /// # Errors
     ///

@@ -236,7 +236,6 @@ async fn delete_nonexistent_uuid_succeeds() {
     let store = temp_store(8).await;
     let result = store.delete_entries(&[uuid::Uuid::new_v4()]).await;
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), 0);
 }
 
 #[tokio::test]

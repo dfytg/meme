@@ -111,6 +111,31 @@ mod tests {
         e.topic = Some("schedule".into());
         let json = serde_json::to_string(&e).unwrap();
         let e2: Memory = serde_json::from_str(&json).unwrap();
-        assert_eq!(e, e2);
+        assert_eq!(e.id, e2.id);
+        assert_eq!(e.content, e2.content);
+        assert_eq!(e.keywords, e2.keywords);
+        assert_eq!(e.persons, e2.persons);
+        assert_eq!(e.topic, e2.topic);
+    }
+
+    #[test]
+    fn hash_by_id() {
+        use std::collections::HashSet;
+        let e1 = Memory::new("a");
+        let e1_clone = e1.clone();
+        let e2 = Memory::new("b");
+        let mut set = HashSet::new();
+        set.insert(e1);
+        assert!(!set.insert(e1_clone));
+        assert!(set.insert(e2));
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn display_format() {
+        let e = Memory::new("test content");
+        let display = format!("{e}");
+        assert!(display.contains("test content"));
+        assert!(display.starts_with('['));
     }
 }
