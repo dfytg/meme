@@ -46,13 +46,13 @@ mod builder;
 pub mod config;
 pub(crate) mod embedding;
 pub mod error;
-mod facade;
 pub(crate) mod llm;
+mod meme;
 pub mod model;
 pub(crate) mod pipeline;
 pub mod store;
 
 pub use builder::MemeBuilder;
-pub use facade::Meme;
+pub use meme::Meme;
 pub use model::{Dialogue, Event, EventType, Memory, Scope};
 pub use store::ConsolidationStats;
