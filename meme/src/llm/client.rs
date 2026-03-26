@@ -62,7 +62,7 @@ impl Default for ChatOptions {
     fn default() -> Self {
         Self {
             temperature: 0.1,
-            json_mode: false,
+            json_mode: true,
         }
     }
 }
@@ -191,7 +191,7 @@ mod tests {
     fn chat_options_default() {
         let opts = ChatOptions::default();
         assert!((opts.temperature - 0.1).abs() < f32::EPSILON);
-        assert!(!opts.json_mode);
+        assert!(opts.json_mode);
     }
 
     #[test]

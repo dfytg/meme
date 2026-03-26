@@ -87,13 +87,13 @@ impl VectorStore {
 
     fn build_schema(&self) -> SchemaRef {
         Arc::new(Schema::new(vec![
-            Field::new("entry_id", DataType::Utf8, false),
+            Field::new("id", DataType::Utf8, false),
             Field::new("content", DataType::Utf8, false),
-            Field::new("keywords_text", DataType::Utf8, false),
+            Field::new("keywords", DataType::Utf8, false),
             Field::new("timestamp", DataType::Utf8, true),
             Field::new("location", DataType::Utf8, true),
-            Field::new("persons_text", DataType::Utf8, false),
-            Field::new("entities_text", DataType::Utf8, false),
+            Field::new("persons", DataType::Utf8, false),
+            Field::new("entities", DataType::Utf8, false),
             Field::new("topic", DataType::Utf8, true),
             Field::new("user_id", DataType::Utf8, true),
             Field::new("session_id", DataType::Utf8, true),
@@ -150,13 +150,13 @@ impl VectorStore {
                 .column_by_name(name)
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>())
         };
-        let id_col = col("entry_id");
+        let id_col = col("id");
         let rest_col = col("content");
-        let kw_col = col("keywords_text");
+        let kw_col = col("keywords");
         let ts_col = col("timestamp");
         let loc_col = col("location");
-        let per_col = col("persons_text");
-        let ent_col = col("entities_text");
+        let per_col = col("persons");
+        let ent_col = col("entities");
         let topic_col = col("topic");
         let uid_col = col("user_id");
         let sid_col = col("session_id");
@@ -323,7 +323,7 @@ impl VectorStore {
             .iter()
             .map(|kw| {
                 let safe = escape_like(kw);
-                format!("(content LIKE '%{safe}%' OR keywords_text LIKE '%{safe}%')")
+                format!("(content LIKE '%{safe}%' OR keywords LIKE '%{safe}%')")
             })
             .collect();
         let mut where_clause = format!("({})", conditions.join(" OR "));
@@ -363,7 +363,7 @@ impl VectorStore {
         if let Some(persons) = &filter.persons {
             let conds: Vec<String> = persons
                 .iter()
-                .map(|p| format!("persons_text LIKE '%{}%'", escape_like(p)))
+                .map(|p| format!("persons LIKE '%{}%'", escape_like(p)))
                 .collect();
             if !conds.is_empty() {
                 conditions.push(format!("({})", conds.join(" OR ")));
@@ -375,7 +375,7 @@ impl VectorStore {
         if let Some(entities) = &filter.entities {
             let conds: Vec<String> = entities
                 .iter()
-                .map(|e| format!("entities_text LIKE '%{}%'", escape_like(e)))
+                .map(|e| format!("entities LIKE '%{}%'", escape_like(e)))
                 .collect();
             if !conds.is_empty() {
                 conditions.push(format!("({})", conds.join(" OR ")));
@@ -450,7 +450,7 @@ impl VectorStore {
         let table = self.get_table().await?;
         let stream = table
             .query()
-            .only_if(format!("entry_id = '{id}'"))
+            .only_if(format!("id = '{id}'"))
             .limit(1)
             .execute()
             .await?;
@@ -464,33 +464,28 @@ impl VectorStore {
     ///
     /// Returns an error if the delete or insert fails.
     pub async fn update_entry(&self, entry: &Memory, vector: &[f32]) -> Result<()> {
-        self.delete_entries(&[entry.id.to_string()]).await?;
+        self.delete_entries(&[entry.id]).await?;
         self.add_entries(std::slice::from_ref(entry), &[vector.to_vec()])
             .await
     }
 
-    /// Delete entries by their IDs.
+    /// Delete entries by their UUIDs.
     ///
     /// # Errors
     ///
     /// Returns an error if the delete operation fails.
-    pub async fn delete_entries(&self, entry_ids: &[String]) -> Result<usize> {
-        if entry_ids.is_empty() {
+    pub async fn delete_entries(&self, ids: &[uuid::Uuid]) -> Result<usize> {
+        if ids.is_empty() {
             return Ok(0);
         }
-        for id in entry_ids {
-            if !is_valid_uuid(id) {
-                return Err(Error::VectorStore(format!("invalid entry id: {id}")));
-            }
-        }
         let table = self.get_table().await?;
-        let ids_csv: String = entry_ids
+        let ids_csv: String = ids
             .iter()
             .map(|id| format!("'{id}'"))
             .collect::<Vec<_>>()
             .join(", ");
-        table.delete(&format!("entry_id IN ({ids_csv})")).await?;
-        let count = entry_ids.len();
+        table.delete(&format!("id IN ({ids_csv})")).await?;
+        let count = ids.len();
         tracing::info!(count, "deleted entries from vector store");
         Ok(count)
     }
@@ -543,139 +538,6 @@ impl VectorStore {
         tracing::info!(table = %self.table_name, "cleared entire vector store");
         Ok(())
     }
-
-    /// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
-    ///
-    /// Operates within the given `scope` to respect multi-tenant isolation.
-    /// Uses ANN search per entry to find near-duplicates (O(n·k) instead of O(n²)).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if reading or deleting entries fails.
-    pub async fn consolidate(
-        &self,
-        max_age_days: u32,
-        decay_factor: f64,
-        merge_threshold: f64,
-        min_importance: f64,
-        scope: &Scope,
-    ) -> Result<ConsolidationStats> {
-        let pairs = self.get_all_with_vectors(scope).await?;
-        if pairs.is_empty() {
-            return Ok(ConsolidationStats::default());
-        }
-
-        let t0 = std::time::Instant::now();
-        let (entries, vectors): (Vec<Memory>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
-        let n = entries.len();
-
-        let now = chrono::Utc::now();
-        let max_age_secs = f64::from(max_age_days) * 86400.0;
-        let mut importance: Vec<f64> = vec![1.0; n];
-        let mut dead = std::collections::HashSet::new();
-
-        let mut decayed = 0usize;
-        for (i, entry) in entries.iter().enumerate() {
-            let Some(ts) = entry.timestamp else { continue };
-            let age = (now - ts).num_seconds() as f64;
-            if age > max_age_secs {
-                importance[i] *= decay_factor;
-                if importance[i] < min_importance {
-                    dead.insert(i);
-                }
-                decayed += 1;
-            }
-        }
-
-        // ANN-based near-duplicate detection: batch parallel neighbor queries.
-        let merge_k = 5;
-        let mut merged = 0usize;
-        let mut ids_to_delete: Vec<String> = Vec::new();
-
-        // Build a lookup from entry ID → index for O(1) neighbor resolution.
-        let id_to_idx: std::collections::HashMap<uuid::Uuid, usize> =
-            entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
-
-        // Parallel ANN queries for all live entries.
-        let live_indices: Vec<usize> = (0..n).filter(|i| !dead.contains(i)).collect();
-        let max_ann_workers = 8;
-        let semaphore = tokio::sync::Semaphore::new(max_ann_workers);
-        let vectors_ref = &vectors;
-        let ann_futures = live_indices.iter().map(|&i| {
-            let sem = &semaphore;
-            async move {
-                let _permit = sem.acquire().await;
-                self.semantic_search(&vectors_ref[i], merge_k, scope)
-                    .await
-                    .map(|neighbors| (i, neighbors))
-            }
-        });
-        let all_neighbors: Vec<(usize, Vec<Memory>)> =
-            futures::future::try_join_all(ann_futures).await?;
-
-        // Process neighbors sequentially (mutates `dead`).
-        for (i, neighbors) in all_neighbors {
-            if dead.contains(&i) {
-                continue;
-            }
-            for neighbor in &neighbors {
-                if neighbor.id == entries[i].id {
-                    continue;
-                }
-                let Some(&j) = id_to_idx.get(&neighbor.id) else {
-                    continue;
-                };
-                if dead.contains(&j) {
-                    continue;
-                }
-                let sim = cosine_similarity(&vectors[i], &vectors[j]);
-                if sim >= merge_threshold {
-                    let loser = if importance[i] >= importance[j] { j } else { i };
-                    if dead.insert(loser) {
-                        ids_to_delete.push(entries[loser].id.to_string());
-                        merged += 1;
-                    }
-                }
-            }
-        }
-
-        let mut pruned = 0usize;
-        for (i, entry) in entries.iter().enumerate() {
-            if !dead.contains(&i) && importance[i] < min_importance {
-                ids_to_delete.push(entry.id.to_string());
-                pruned += 1;
-            }
-        }
-
-        if !ids_to_delete.is_empty() {
-            self.delete_entries(&ids_to_delete).await?;
-        }
-
-        let stats = ConsolidationStats {
-            scanned: n,
-            decayed,
-            merged,
-            pruned,
-            duration_secs: t0.elapsed().as_secs_f64(),
-        };
-        tracing::info!(?stats, "consolidation complete");
-        Ok(stats)
-    }
-}
-
-/// Statistics from a consolidation run.
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
-pub struct ConsolidationStats {
-    /// Total entries scanned.
-    pub scanned: usize,
-    /// Entries whose importance was decayed.
-    pub decayed: usize,
-    /// Entries merged (near-duplicates removed).
-    pub merged: usize,
-    /// Entries pruned (below importance threshold).
-    pub pruned: usize,
-    /// Duration in seconds.
-    pub duration_secs: f64,
 }
 
 fn scope_matches(entry: &Memory, scope: &Scope) -> bool {
@@ -727,10 +589,6 @@ fn escape_sql_string(s: &str) -> String {
     s.replace('\'', "''")
 }
 
-fn is_valid_uuid(s: &str) -> bool {
-    uuid::Uuid::parse_str(s).is_ok()
-}
-
 fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
     let n = batch.num_rows();
     let Some(col) = batch.column_by_name("vector") else {
@@ -757,21 +615,6 @@ fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
     vectors
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
-    let dot: f64 = a
-        .iter()
-        .zip(b)
-        .map(|(x, y)| f64::from(*x) * f64::from(*y))
-        .sum();
-    let mag_a: f64 = a.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
-    let mag_b: f64 = b.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
-    if mag_a == 0.0 || mag_b == 0.0 {
-        0.0
-    } else {
-        dot / (mag_a * mag_b)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -794,66 +637,9 @@ mod tests {
     }
 
     #[test]
-    fn cosine_similarity_identical() {
-        let a = vec![1.0, 0.0, 0.0];
-        let b = vec![1.0, 0.0, 0.0];
-        let sim = cosine_similarity(&a, &b);
-        assert!((sim - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn cosine_similarity_orthogonal() {
-        let a = vec![1.0, 0.0];
-        let b = vec![0.0, 1.0];
-        let sim = cosine_similarity(&a, &b);
-        assert!(sim.abs() < 1e-9);
-    }
-
-    #[test]
-    fn cosine_similarity_opposite() {
-        let a = vec![1.0, 0.0];
-        let b = vec![-1.0, 0.0];
-        let sim = cosine_similarity(&a, &b);
-        assert!((sim - (-1.0)).abs() < 1e-9);
-    }
-
-    #[test]
-    fn cosine_similarity_zero_vector() {
-        let a = vec![0.0, 0.0];
-        let b = vec![1.0, 2.0];
-        assert!((cosine_similarity(&a, &b) - 0.0).abs() < 1e-9);
-        assert!((cosine_similarity(&b, &a) - 0.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn cosine_similarity_arbitrary() {
-        let a = vec![1.0, 2.0, 3.0];
-        let b = vec![4.0, 5.0, 6.0];
-        let dot = 3.0f64.mul_add(6.0, 2.0f64.mul_add(5.0, 1.0 * 4.0));
-        let mag_a = (1.0_f64 + 4.0 + 9.0).sqrt();
-        let mag_b = (16.0_f64 + 25.0 + 36.0).sqrt();
-        let expected = dot / (mag_a * mag_b);
-        let sim = cosine_similarity(&a, &b);
-        assert!((sim - expected).abs() < 1e-9);
-    }
-
-    #[test]
     fn escape_like_backslash() {
         assert_eq!(escape_like(r"a\b"), r"a\\b");
         assert_eq!(escape_like(r"c:\path"), r"c:\\path");
-    }
-
-    #[test]
-    fn is_valid_uuid_valid() {
-        let id = uuid::Uuid::new_v4().to_string();
-        assert!(is_valid_uuid(&id));
-    }
-
-    #[test]
-    fn is_valid_uuid_invalid() {
-        assert!(!is_valid_uuid("not-a-uuid"));
-        assert!(!is_valid_uuid(""));
-        assert!(!is_valid_uuid("'; DROP TABLE --"));
     }
 
     #[test]

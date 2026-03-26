@@ -56,3 +56,4 @@ pub mod store;
 pub use builder::MemeBuilder;
 pub use facade::Meme;
 pub use model::{Dialogue, Event, EventType, Memory, Scope};
+pub use store::ConsolidationStats;

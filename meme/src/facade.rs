@@ -13,8 +13,8 @@ use crate::embedding::Embedder;
 use crate::error::{Error, Result};
 use crate::llm::{self, LlmClient, ReExtractResponse};
 use crate::model::{Dialogue, Event, EventType, Memory, Scope};
-use crate::pipeline::{self, HybridRetriever, MemoryBuilder};
-use crate::store::{HistoryStore, VectorStore};
+use crate::pipeline::{self, Extractor, HybridRetriever};
+use crate::store::{ConsolidationStats, HistoryStore, VectorStore};
 
 /// The main entry point for the meme memory system.
 ///
@@ -25,7 +25,7 @@ pub struct Meme {
     pub(crate) store: Arc<VectorStore>,
     pub(crate) embedder: Arc<Embedder>,
     pub(crate) history: Arc<HistoryStore>,
-    pub(crate) builder: Mutex<MemoryBuilder>,
+    pub(crate) extractor: Mutex<Extractor>,
     pub(crate) retriever: HybridRetriever,
     pub(crate) config: Config,
     pub(crate) scope: Scope,
@@ -64,9 +64,9 @@ impl Meme {
         if dialogues.is_empty() {
             return Ok(());
         }
-        let mut builder = self.builder.lock().await;
-        let entries = builder.add_dialogues(dialogues.to_vec()).await?;
-        drop(builder);
+        let mut extractor = self.extractor.lock().await;
+        let entries = extractor.add_dialogues(dialogues.to_vec()).await?;
+        drop(extractor);
         if !entries.is_empty() {
             self.ingest_entries(&entries).await?;
         }
@@ -82,9 +82,9 @@ impl Meme {
     ///
     /// Returns an error if LLM extraction or storage fails.
     pub async fn flush(&self) -> Result<()> {
-        let mut builder = self.builder.lock().await;
-        let entries = builder.finalize().await?;
-        drop(builder);
+        let mut extractor = self.extractor.lock().await;
+        let entries = extractor.flush().await?;
+        drop(extractor);
         if !entries.is_empty() {
             self.ingest_entries(&entries).await?;
         }
@@ -121,14 +121,7 @@ impl Meme {
             return Ok(());
         }
         let mut scoped: Vec<Memory> = entries.to_vec();
-        for entry in &mut scoped {
-            if entry.user_id.is_none() {
-                entry.user_id.clone_from(&self.scope.user_id);
-            }
-            if entry.session_id.is_none() {
-                entry.session_id.clone_from(&self.scope.session_id);
-            }
-        }
+        self.apply_scope(&mut scoped);
         let texts: Vec<&str> = scoped.iter().map(|e| e.content.as_str()).collect();
         let vectors = self.embedder.encode_documents(&texts).await?;
         self.store.add_entries(&scoped, &vectors).await?;
@@ -236,7 +229,7 @@ impl Meme {
             .await?
             .ok_or_else(|| Error::NotFound { id: id.to_string() })?;
 
-        self.store.delete_entries(&[id.to_string()]).await?;
+        self.store.delete_entries(&[id]).await?;
         if let Err(e) = self
             .history
             .record(
@@ -319,15 +312,37 @@ impl Meme {
         self.store.clear(&self.scope).await
     }
 
+    /// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading or deleting entries fails.
+    pub async fn consolidate(
+        &self,
+        max_age_days: u32,
+        decay_factor: f64,
+        merge_threshold: f64,
+        min_importance: f64,
+    ) -> Result<ConsolidationStats> {
+        self.store
+            .consolidate(
+                max_age_days,
+                decay_factor,
+                merge_threshold,
+                min_importance,
+                &self.scope,
+            )
+            .await
+    }
+
     /// Get a reference to the configuration.
     #[must_use]
     pub const fn config(&self) -> &Config {
         &self.config
     }
 
-    async fn ingest_entries(&self, entries: &[Memory]) -> Result<()> {
-        let mut scoped: Vec<Memory> = entries.to_vec();
-        for entry in &mut scoped {
+    fn apply_scope(&self, entries: &mut [Memory]) {
+        for entry in entries {
             if entry.user_id.is_none() {
                 entry.user_id.clone_from(&self.scope.user_id);
             }
@@ -335,6 +350,11 @@ impl Meme {
                 entry.session_id.clone_from(&self.scope.session_id);
             }
         }
+    }
+
+    async fn ingest_entries(&self, entries: &[Memory]) -> Result<()> {
+        let mut scoped: Vec<Memory> = entries.to_vec();
+        self.apply_scope(&mut scoped);
 
         let texts: Vec<&str> = scoped.iter().map(|e| e.content.as_str()).collect();
         let vectors = self.embedder.encode_documents(&texts).await?;
@@ -366,7 +386,7 @@ impl Meme {
                     tracing::warn!(memory_id = %uid, error = %e, "history record failed");
                 }
             }
-            let ids: Vec<String> = deletes.iter().map(|(uid, _)| uid.to_string()).collect();
+            let ids: Vec<Uuid> = deletes.iter().map(|(uid, _)| *uid).collect();
             self.store.delete_entries(&ids).await?;
             tracing::info!(count = deletes.len(), "deleted superseded memories");
         }

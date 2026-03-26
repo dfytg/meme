@@ -130,8 +130,7 @@ async fn delete_entries_by_id() {
     store.add_entries(&entries, &vectors).await.unwrap();
     assert_eq!(store.count(&scope).await.unwrap(), 2);
 
-    let id_to_delete = entries[0].id.to_string();
-    store.delete_entries(&[id_to_delete]).await.unwrap();
+    store.delete_entries(&[entries[0].id]).await.unwrap();
     assert_eq!(store.count(&scope).await.unwrap(), 1);
 
     let remaining = store.get_all(&scope).await.unwrap();
@@ -233,10 +232,11 @@ async fn entries_vectors_length_mismatch_rejected() {
 }
 
 #[tokio::test]
-async fn delete_invalid_uuid_rejected() {
+async fn delete_nonexistent_uuid_succeeds() {
     let store = temp_store(8).await;
-    let result = store.delete_entries(&["not-a-uuid".into()]).await;
-    assert!(result.is_err());
+    let result = store.delete_entries(&[uuid::Uuid::new_v4()]).await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 0);
 }
 
 #[tokio::test]

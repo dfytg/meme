@@ -5,5 +5,5 @@ pub mod generator;
 pub mod reconciler;
 mod retriever;
 
-pub use builder::MemoryBuilder;
+pub use builder::Extractor;
 pub use retriever::HybridRetriever;

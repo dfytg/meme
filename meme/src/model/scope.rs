@@ -11,3 +11,11 @@ pub struct Scope {
     /// Filter by session identifier.
     pub session_id: Option<String>,
 }
+
+impl Scope {
+    /// Returns `true` if no scope filters are set.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.user_id.is_none() && self.session_id.is_none()
+    }
+}

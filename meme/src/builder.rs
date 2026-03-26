@@ -11,7 +11,7 @@ use crate::facade::Meme;
 use crate::http;
 use crate::llm::LlmClient;
 use crate::model::Scope;
-use crate::pipeline::{HybridRetriever, MemoryBuilder};
+use crate::pipeline::{Extractor, HybridRetriever};
 use crate::store::{HistoryStore, VectorStore};
 
 /// Builder for constructing a [`Meme`] instance.
@@ -141,7 +141,7 @@ impl MemeBuilder {
             store.clear_all().await?;
         }
 
-        let mem_builder = MemoryBuilder::new(
+        let extractor = Extractor::new(
             Arc::clone(&llm),
             &config.pipeline,
             config.pipeline.max_build_workers,
@@ -168,7 +168,7 @@ impl MemeBuilder {
             store,
             embedder,
             history,
-            builder: Mutex::new(mem_builder),
+            extractor: Mutex::new(extractor),
             retriever,
             config,
             scope,

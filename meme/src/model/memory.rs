@@ -1,5 +1,8 @@
 //! Core memory — the fundamental unit of stored knowledge.
 
+use std::fmt;
+use std::hash::{Hash, Hasher};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,7 +14,7 @@ use uuid::Uuid;
 /// - **Semantic**: the `content` text is embedded as a dense vector
 /// - **Lexical**: `keywords` enable BM25-style exact matching
 /// - **Symbolic**: structured metadata (`timestamp`, `location`, `persons`, `entities`, `topic`)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {
     /// Unique identifier.
     pub id: Uuid,
@@ -35,6 +38,26 @@ pub struct Memory {
     /// Session identifier for multi-session isolation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+}
+
+impl PartialEq for Memory {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Memory {}
+
+impl Hash for Memory {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl fmt::Display for Memory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[{}] {}", &self.id.to_string()[..8], self.content)
+    }
 }
 
 impl Memory {

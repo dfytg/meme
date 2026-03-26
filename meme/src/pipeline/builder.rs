@@ -1,4 +1,4 @@
-//! Stage 1+2: Memory Builder — Semantic Structured Compression + Online Semantic Synthesis.
+//! Stage 1+2: Extractor — Semantic Structured Compression + Online Semantic Synthesis.
 //!
 //! Processes dialogue windows through an LLM to extract structured, atomic memory entries.
 //! Supports parallel processing of multiple windows via tokio tasks.
@@ -10,9 +10,9 @@ use crate::error::{Error, Result};
 use crate::llm::{ChatOptions, ExtractionResponse, LlmClient, Message, prompt};
 use crate::model::{Dialogue, Memory};
 
-/// Memory builder that implements Stage 1 (Semantic Structured Compression)
-/// and Stage 2 (Online Semantic Synthesis) of the `SimpleMem` pipeline.
-pub struct MemoryBuilder {
+/// Dialogue-to-memory extractor implementing Stage 1 (Semantic Structured Compression)
+/// and Stage 2 (Online Semantic Synthesis) of the pipeline.
+pub struct Extractor {
     llm: Arc<LlmClient>,
     window_size: usize,
     overlap_size: usize,
@@ -24,9 +24,9 @@ pub struct MemoryBuilder {
     previous_entries: Vec<Memory>,
 }
 
-impl std::fmt::Debug for MemoryBuilder {
+impl std::fmt::Debug for Extractor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MemoryBuilder")
+        f.debug_struct("Extractor")
             .field("window_size", &self.window_size)
             .field("overlap_size", &self.overlap_size)
             .field("buffer_len", &self.dialogue_buffer.len())
@@ -35,8 +35,8 @@ impl std::fmt::Debug for MemoryBuilder {
     }
 }
 
-impl MemoryBuilder {
-    /// Create a new memory builder.
+impl Extractor {
+    /// Create a new extractor.
     #[must_use]
     pub fn new(
         llm: Arc<LlmClient>,
@@ -82,13 +82,13 @@ impl MemoryBuilder {
         Ok(all_entries)
     }
 
-    /// Process remaining dialogues in the buffer.
+    /// Flush the dialogue buffer — process any remaining buffered dialogues.
     ///
     /// # Errors
     ///
     /// Returns an error if LLM extraction fails.
     #[tracing::instrument(skip(self), fields(remaining = self.dialogue_buffer.len()))]
-    pub async fn finalize(&mut self) -> Result<Vec<Memory>> {
+    pub async fn flush(&mut self) -> Result<Vec<Memory>> {
         if self.dialogue_buffer.is_empty() {
             return Ok(Vec::new());
         }
