@@ -4,7 +4,7 @@
 //!
 //! `meme` is a production-grade memory pipeline written in Rust.  It persists
 //! knowledge extracted from conversations (or raw facts) to disk via
-//! [LanceDB](https://lancedb.com) and tracks every change in a `SQLite`e` audit log.
+//! [LanceDB](https://lancedb.com) and tracks every change in a `SQLite` audit log.
 //!
 //! ## Pipeline
 //!
