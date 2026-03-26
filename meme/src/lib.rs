@@ -28,9 +28,8 @@
 //! // Direct fact ingestion (skips dialogue windowing)
 //! meme.add("Alice prefers coffee over tea").await?;
 //!
-//! // Retrieval
+//! // Search & Q&A
 //! let results = meme.search("Alice meeting").await?;
-//! let contexts = meme.retrieve("When will Alice meet?").await?;
 //! let answer = meme.ask("When will Alice meet?").await?;
 //! # Ok(())
 //! # }
@@ -42,13 +41,13 @@
 
 mod builder;
 pub mod config;
-pub mod embedding;
+pub(crate) mod embedding;
 pub mod error;
 mod facade;
-pub mod http;
-pub mod llm;
+pub(crate) mod http;
+pub(crate) mod llm;
 pub mod model;
-pub mod pipeline;
+pub(crate) mod pipeline;
 pub mod store;
 
 pub use builder::MemeBuilder;

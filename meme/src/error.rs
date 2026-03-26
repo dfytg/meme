@@ -120,7 +120,7 @@ impl Error {
     pub const fn is_retryable(&self) -> bool {
         match self {
             Self::Llm { retryable, .. } => *retryable,
-            Self::JsonParse(_) | Self::Http(_) => true,
+            Self::Http(_) => true,
             _ => false,
         }
     }

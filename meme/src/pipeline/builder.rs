@@ -119,18 +119,6 @@ impl MemoryBuilder {
         Ok(entries)
     }
 
-    /// Returns the number of dialogues processed so far.
-    #[must_use]
-    pub const fn processed_count(&self) -> usize {
-        self.processed_count
-    }
-
-    /// Returns the number of dialogues in the buffer.
-    #[must_use]
-    pub const fn buffer_len(&self) -> usize {
-        self.dialogue_buffer.len()
-    }
-
     async fn process_window(&mut self) -> Result<Vec<Memory>> {
         if self.dialogue_buffer.is_empty() {
             return Ok(Vec::new());
@@ -252,7 +240,7 @@ async fn generate_entries_standalone(
 ) -> Result<Vec<Memory>> {
     let dialogue_text: String = dialogues
         .iter()
-        .map(ToString::to_string)
+        .map(Dialogue::format_for_prompt)
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = custom_prompt.map_or_else(
@@ -275,6 +263,6 @@ async fn generate_entries_standalone(
     Ok(response
         .entries
         .into_iter()
-        .filter_map(crate::llm::ExtractedEntry::into_memory_entry)
+        .filter_map(crate::llm::ExtractedEntry::into_memory)
         .collect())
 }

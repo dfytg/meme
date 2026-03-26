@@ -266,16 +266,16 @@ impl Meme {
         Ok(())
     }
 
-    /// Search memories by query text (semantic search).
+    /// Search memories using the full hybrid retrieval pipeline.
+    ///
+    /// Combines semantic ANN search, keyword (FTS/LIKE) search, and structured
+    /// metadata filtering with optional LLM-driven query planning and reflection.
     ///
     /// # Errors
     ///
     /// Returns an error if the search fails.
     pub async fn search(&self, query: &str) -> Result<Vec<Memory>> {
-        let query_vec = self.embedder.encode_query(query).await?;
-        self.store
-            .semantic_search(&query_vec, self.config.pipeline.semantic_top_k, &self.scope)
-            .await
+        self.retriever.retrieve(query).await
     }
 
     /// Get the history of changes for a specific memory entry.
@@ -312,19 +312,6 @@ impl Meme {
     /// Returns an error if the read operation fails.
     pub async fn list(&self) -> Result<Vec<Memory>> {
         self.store.get_all(&self.scope).await
-    }
-
-    /// Execute the full hybrid retrieval pipeline (planning + multi-view search).
-    ///
-    /// Unlike [`search`](Self::search) which only does semantic ANN,
-    /// this method uses intent-aware planning, keyword search, structured
-    /// metadata filtering, and optional reflection.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if retrieval fails.
-    pub async fn retrieve(&self, query: &str) -> Result<Vec<Memory>> {
-        self.retriever.retrieve(query).await
     }
 
     /// Count stored memory entries.

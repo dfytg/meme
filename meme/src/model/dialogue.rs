@@ -33,19 +33,29 @@ impl Dialogue {
     }
 }
 
+impl Dialogue {
+    /// Format this dialogue for inclusion in an LLM extraction prompt.
+    ///
+    /// Includes timestamp when available for temporal anchoring.
+    #[must_use]
+    pub fn format_for_prompt(&self) -> String {
+        self.timestamp.map_or_else(
+            || format!("{}: {}", self.speaker, self.content),
+            |ts| {
+                format!(
+                    "[{} {}] {}: {}",
+                    ts.format("%d %B %Y"),
+                    ts.format("%H:%M"),
+                    self.speaker,
+                    self.content,
+                )
+            },
+        )
+    }
+}
+
 impl std::fmt::Display for Dialogue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(ts) = self.timestamp {
-            write!(
-                f,
-                "[{} {}] {}: {}",
-                ts.format("%d %B %Y"),
-                ts.format("%H:%M"),
-                self.speaker,
-                self.content
-            )
-        } else {
-            write!(f, "{}: {}", self.speaker, self.content)
-        }
+        write!(f, "{}: {}", self.speaker, self.content)
     }
 }

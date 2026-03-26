@@ -47,15 +47,6 @@ impl Message {
             content: content.into(),
         }
     }
-
-    /// Create an assistant message.
-    #[must_use]
-    pub fn assistant(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: content.into(),
-        }
-    }
 }
 
 /// Options for a chat completion request.
@@ -153,34 +144,6 @@ impl LlmClient {
         Err(last_err.unwrap_or_else(|| Error::llm("all retries exhausted")))
     }
 
-    /// Send a chat completion and return the raw response text.
-    ///
-    /// Prefer [`chat_structured`] for JSON responses.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API call fails after retries.
-    pub async fn chat(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
-        let mut last_err = None;
-        for attempt in 0..self.max_retries {
-            match self.call_api(messages, opts).await {
-                Ok(content) => return Ok(content),
-                Err(e) => {
-                    if !e.is_retryable() {
-                        return Err(e);
-                    }
-                    tracing::warn!(attempt = attempt + 1, error = %e, "LLM API call failed");
-                    last_err = Some(e);
-                    if attempt + 1 < self.max_retries {
-                        let wait = 2u64.saturating_pow(attempt).min(30);
-                        tokio::time::sleep(Duration::from_secs(wait)).await;
-                    }
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| Error::llm("all retries exhausted")))
-    }
-
     async fn call_api(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -239,8 +202,5 @@ mod tests {
 
         let usr = Message::user("question");
         assert_eq!(usr.role, Role::User);
-
-        let ast = Message::assistant("answer");
-        assert_eq!(ast.role, Role::Assistant);
     }
 }

@@ -88,7 +88,7 @@ impl VectorStore {
     fn build_schema(&self) -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("entry_id", DataType::Utf8, false),
-            Field::new("restatement", DataType::Utf8, false),
+            Field::new("content", DataType::Utf8, false),
             Field::new("keywords_text", DataType::Utf8, false),
             Field::new("timestamp", DataType::Utf8, true),
             Field::new("location", DataType::Utf8, true),
@@ -134,7 +134,7 @@ impl VectorStore {
     async fn rebuild_fts_index(&self, table: &lancedb::Table) {
         if let Err(e) = table
             .create_index(
-                &["restatement"],
+                &["content"],
                 lancedb::index::Index::FTS(lancedb::index::scalar::FtsIndexBuilder::default()),
             )
             .execute()
@@ -151,7 +151,7 @@ impl VectorStore {
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>())
         };
         let id_col = col("entry_id");
-        let rest_col = col("restatement");
+        let rest_col = col("content");
         let kw_col = col("keywords_text");
         let ts_col = col("timestamp");
         let loc_col = col("location");
@@ -323,7 +323,7 @@ impl VectorStore {
             .iter()
             .map(|kw| {
                 let safe = escape_like(kw);
-                format!("(restatement LIKE '%{safe}%' OR keywords_text LIKE '%{safe}%')")
+                format!("(content LIKE '%{safe}%' OR keywords_text LIKE '%{safe}%')")
             })
             .collect();
         let mut where_clause = format!("({})", conditions.join(" OR "));

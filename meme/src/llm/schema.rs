@@ -45,7 +45,7 @@ pub struct ExtractedEntry {
 impl ExtractedEntry {
     /// Convert into a [`Memory`] with a fresh UUID.
     #[must_use]
-    pub fn into_memory_entry(self) -> Option<Memory> {
+    pub fn into_memory(self) -> Option<Memory> {
         if self.lossless_restatement.is_empty() {
             return None;
         }

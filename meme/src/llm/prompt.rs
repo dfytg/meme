@@ -21,7 +21,7 @@ pub fn extraction(dialogue_text: &str, context: &str) -> String {
 1. **Complete Coverage**: Generate enough memory entries to ensure ALL information in the dialogues is captured
 2. **Force Disambiguation**: Absolutely PROHIBIT using pronouns (he, she, it, they, this, that) and relative time (yesterday, today, last week, tomorrow)
 3. **Temporal Anchoring**: Convert ALL relative time references to absolute dates using the dialogue timestamps as reference. E.g., if dialogue is dated "25 May 2023" and speaker says "last Sunday", compute the actual date. If dialogue says "next month", compute the actual month.
-4. **Lossless Information**: Each entry's lossless_content must be a complete, independent, understandable sentence
+4. **Lossless Information**: Each entry's lossless_restatement must be a complete, independent, understandable sentence
 5. **Precise Extraction**:
    - keywords: Core keywords (names, places, entities, topic words)
    - timestamp: Absolute time in ISO 8601 format (if explicit time mentioned in dialogue)
@@ -37,7 +37,7 @@ Return a JSON object containing an "entries" array:
 {{
   "entries": [
     {{
-      "lossless_content": "Complete unambiguous content (must include all subjects, objects, time, location, etc.)",
+      "lossless_restatement": "Complete unambiguous restatement (must include all subjects, objects, time, location, etc.)",
       "keywords": ["keyword1", "keyword2"],
       "timestamp": "YYYY-MM-DDTHH:MM:SSZ or null",
       "location": "location name or null",
