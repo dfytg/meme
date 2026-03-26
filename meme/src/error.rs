@@ -102,14 +102,6 @@ impl Error {
         }
     }
 
-    /// Create a validation error with field context.
-    pub fn validation_field(field: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::Validation {
-            message: message.into(),
-            field: Some(field.into()),
-        }
-    }
-
     /// Create a vector store error from an Arrow error.
     pub fn arrow(e: impl std::fmt::Display) -> Self {
         Self::VectorStore(e.to_string())

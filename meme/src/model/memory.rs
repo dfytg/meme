@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 /// A self-contained, unambiguous memory unit with multi-view indexing.
 ///
-/// Each memory stores a lossless restatement (no pronouns, absolute timestamps)
+/// Each memory stores lossless content (no pronouns, absolute timestamps)
 /// along with three indexing layers:
 /// - **Semantic**: the `content` text is embedded as a dense vector
 /// - **Lexical**: `keywords` enable BM25-style exact matching

@@ -36,7 +36,7 @@ impl Dialogue {
     ///
     /// Includes timestamp when available for temporal anchoring.
     #[must_use]
-    pub fn format_for_prompt(&self) -> String {
+    pub(crate) fn format_for_prompt(&self) -> String {
         self.timestamp.map_or_else(
             || format!("{}: {}", self.speaker, self.content),
             |ts| {

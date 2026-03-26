@@ -1,9 +1,9 @@
 //! LLM client abstraction — OpenAI-compatible async interface.
 
-pub mod client;
-pub mod json;
+mod client;
+mod json;
 pub mod prompt;
-pub mod schema;
+mod schema;
 
 pub use client::{ChatOptions, LlmClient, Message};
 pub use schema::{

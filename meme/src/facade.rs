@@ -201,7 +201,7 @@ impl Meme {
     }
 
     /// Re-extract structured metadata (keywords, persons, entities, etc.) from
-    /// an entry's restatement via a lightweight LLM call.
+    /// a memory's content via a lightweight LLM call.
     async fn re_extract_metadata(&self, entry: &mut Memory) {
         let prompt = llm::prompt::re_extract(&entry.content);
         let messages = vec![
