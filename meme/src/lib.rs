@@ -47,7 +47,6 @@ pub mod config;
 pub(crate) mod embedding;
 pub mod error;
 mod facade;
-pub(crate) mod http;
 pub(crate) mod llm;
 pub mod model;
 pub(crate) mod pipeline;

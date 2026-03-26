@@ -6,9 +6,8 @@ use tokio::sync::Mutex;
 
 use crate::config::{self, Config};
 use crate::embedding::{self, Embedder};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::facade::Meme;
-use crate::http;
 use crate::llm::LlmClient;
 use crate::model::Scope;
 use crate::pipeline::{Extractor, HybridRetriever};
@@ -104,7 +103,7 @@ impl MemeBuilder {
 
         config.validate()?;
 
-        let http = http::build_http_client()?;
+        let http = build_http_client()?;
         let llm = Arc::new(LlmClient::new(http.clone(), &config.llm)?);
 
         let embedder = Arc::new(match config.embedding.provider {
@@ -119,7 +118,7 @@ impl MemeBuilder {
             }
             #[cfg(not(feature = "onnx"))]
             config::EmbeddingProviderKind::Onnx => {
-                return Err(crate::error::Error::Config(
+                return Err(Error::Config(
                     "ONNX provider requires the 'onnx' feature flag".into(),
                 ));
             }
@@ -174,4 +173,24 @@ impl MemeBuilder {
             scope,
         })
     }
+}
+
+/// Default request timeout.
+const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
+
+/// Default connection timeout.
+const DEFAULT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Default max idle connections per host.
+const DEFAULT_POOL_IDLE_PER_HOST: usize = 10;
+
+/// Build a shared [`reqwest::Client`] with production-ready defaults.
+fn build_http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(DEFAULT_TIMEOUT)
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .pool_max_idle_per_host(DEFAULT_POOL_IDLE_PER_HOST)
+        .user_agent(concat!("meme/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| Error::Internal(format!("failed to build HTTP client: {e}")))
 }
