@@ -1,7 +1,7 @@
 //! Integration tests for `LanceDB`-backed `VectorStore`.
 
-use meme::model::{MemoryEntry, MetadataFilter};
-use meme::store::{Scope, VectorStore};
+use meme::model::{MemoryEntry, MetadataFilter, Scope};
+use meme::store::VectorStore;
 
 async fn temp_store(dim: usize) -> VectorStore {
     let dir = std::env::temp_dir().join(format!("meme_test_{}", uuid::Uuid::new_v4()));
