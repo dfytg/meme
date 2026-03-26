@@ -32,7 +32,7 @@ impl ListCmd {
     pub async fn run(&self) -> anyhow::Result<()> {
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
-        let entries = meme.get_all().await?;
+        let entries = meme.list().await?;
 
         let total = entries.len();
 
@@ -41,15 +41,15 @@ impl ListCmd {
             println!("{}", serde_json::to_string_pretty(&limited)?);
         } else {
             let mut table = Table::new();
-            table.set_header(vec!["#", "ID", "Restatement", "Persons", "Time", "Topic"]);
+            table.set_header(vec!["#", "ID", "Content", "Persons", "Time", "Topic"]);
 
             for (i, entry) in entries.iter().take(self.limit).enumerate() {
-                let restatement = super::truncate_str(&entry.restatement, 80);
+                let content = super::truncate_str(&entry.content, 80);
 
                 table.add_row(vec![
                     Cell::new(i + 1),
                     Cell::new(&entry.id.to_string()[..8]),
-                    Cell::new(restatement),
+                    Cell::new(content),
                     Cell::new(entry.persons.join(", ")),
                     Cell::new(
                         entry

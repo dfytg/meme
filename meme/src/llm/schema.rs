@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::model::MemoryEntry;
+use crate::model::Memory;
 
 /// Response from the extraction prompt (Stage 1).
 #[derive(Debug, Deserialize)]
@@ -43,16 +43,16 @@ pub struct ExtractedEntry {
 }
 
 impl ExtractedEntry {
-    /// Convert into a [`MemoryEntry`] with a fresh UUID.
+    /// Convert into a [`Memory`] with a fresh UUID.
     #[must_use]
-    pub fn into_memory_entry(self) -> Option<MemoryEntry> {
+    pub fn into_memory_entry(self) -> Option<Memory> {
         if self.lossless_restatement.is_empty() {
             return None;
         }
         let timestamp = self.timestamp.as_deref().and_then(parse_timestamp);
-        Some(MemoryEntry {
+        Some(Memory {
             id: Uuid::new_v4(),
-            restatement: self.lossless_restatement,
+            content: self.lossless_restatement,
             keywords: self.keywords,
             timestamp,
             location: self.location,
@@ -161,8 +161,8 @@ pub struct ReExtractResponse {
 }
 
 impl ReExtractResponse {
-    /// Apply extracted metadata onto an existing [`MemoryEntry`].
-    pub fn apply_to(self, entry: &mut MemoryEntry) {
+    /// Apply extracted metadata onto an existing [`Memory`].
+    pub fn apply_to(self, entry: &mut Memory) {
         entry.keywords = self.keywords;
         entry.persons = self.persons;
         entry.entities = self.entities;

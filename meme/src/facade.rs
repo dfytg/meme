@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::embedding::Embedder;
 use crate::error::{Error, Result};
 use crate::llm::{self, LlmClient, ReExtractResponse};
-use crate::model::{Dialogue, EventType, MemoryEntry, MemoryEvent, Scope};
+use crate::model::{Dialogue, Event, EventType, Memory, Scope};
 use crate::pipeline::{self, HybridRetriever, MemoryBuilder};
 use crate::store::{HistoryStore, VectorStore};
 
@@ -95,7 +95,7 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if LLM extraction or storage fails.
-    pub async fn finalize(&self) -> Result<()> {
+    pub async fn flush(&self) -> Result<()> {
         let mut builder = self.builder.lock().await;
         let entries = builder.finalize().await?;
         if !entries.is_empty() {
@@ -117,7 +117,7 @@ impl Meme {
         if content.is_empty() {
             return Err(Error::validation("content must not be empty"));
         }
-        let entry = MemoryEntry::new(content);
+        let entry = Memory::new(content);
         self.ingest_entries(&[entry]).await
     }
 
@@ -129,11 +129,12 @@ impl Meme {
     ///
     /// Returns an error if embedding computation or storage fails.
     #[tracing::instrument(skip(self, entries), fields(count = entries.len()))]
-    pub async fn import_entries(&self, entries: &mut [MemoryEntry]) -> Result<()> {
+    pub async fn import(&self, entries: &[Memory]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
-        for entry in entries.iter_mut() {
+        let mut scoped: Vec<Memory> = entries.to_vec();
+        for entry in &mut scoped {
             if entry.user_id.is_none() {
                 entry.user_id.clone_from(&self.scope.user_id);
             }
@@ -141,17 +142,17 @@ impl Meme {
                 entry.session_id.clone_from(&self.scope.session_id);
             }
         }
-        let texts: Vec<&str> = entries.iter().map(|e| e.restatement.as_str()).collect();
+        let texts: Vec<&str> = scoped.iter().map(|e| e.content.as_str()).collect();
         let vectors = self.embedder.encode_documents(&texts).await?;
-        self.store.add_entries(entries, &vectors).await?;
-        for entry in entries.iter() {
+        self.store.add_entries(&scoped, &vectors).await?;
+        for entry in &scoped {
             if let Err(e) = self
                 .history
                 .record(
                     entry.id,
                     EventType::Add,
                     None,
-                    Some(&entry.restatement),
+                    Some(&entry.content),
                     &self.scope,
                 )
                 .await
@@ -167,7 +168,7 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if the query fails.
-    pub async fn get(&self, id: Uuid) -> Result<Option<MemoryEntry>> {
+    pub async fn get(&self, id: Uuid) -> Result<Option<Memory>> {
         self.store.get_by_id(id).await
     }
 
@@ -187,7 +188,7 @@ impl Meme {
             .ok_or_else(|| Error::NotFound { id: id.to_string() })?;
 
         let mut updated = existing.clone();
-        updated.restatement = new_content.to_owned();
+        updated.content = new_content.to_owned();
         self.re_extract_metadata(&mut updated).await;
 
         let vecs = self.embedder.encode_documents(&[new_content]).await?;
@@ -201,7 +202,7 @@ impl Meme {
             .record(
                 id,
                 EventType::Update,
-                Some(&existing.restatement),
+                Some(&existing.content),
                 Some(new_content),
                 &self.scope,
             )
@@ -214,8 +215,8 @@ impl Meme {
 
     /// Re-extract structured metadata (keywords, persons, entities, etc.) from
     /// an entry's restatement via a lightweight LLM call.
-    async fn re_extract_metadata(&self, entry: &mut MemoryEntry) {
-        let prompt = llm::prompt::re_extract(&entry.restatement);
+    async fn re_extract_metadata(&self, entry: &mut Memory) {
+        let prompt = llm::prompt::re_extract(&entry.content);
         let messages = vec![
             llm::Message::system("Extract structured metadata. Output valid JSON only."),
             llm::Message::user(prompt),
@@ -254,7 +255,7 @@ impl Meme {
             .record(
                 id,
                 EventType::Delete,
-                Some(&existing.restatement),
+                Some(&existing.content),
                 None,
                 &self.scope,
             )
@@ -270,7 +271,7 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if the search fails.
-    pub async fn search(&self, query: &str) -> Result<Vec<MemoryEntry>> {
+    pub async fn search(&self, query: &str) -> Result<Vec<Memory>> {
         let query_vec = self.embedder.encode_query(query).await?;
         self.store
             .semantic_search(&query_vec, self.config.pipeline.semantic_top_k, &self.scope)
@@ -282,7 +283,7 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if the history query fails.
-    pub async fn history(&self, memory_id: Uuid) -> Result<Vec<MemoryEvent>> {
+    pub async fn history(&self, memory_id: Uuid) -> Result<Vec<Event>> {
         self.history.get_history(memory_id, &self.scope).await
     }
 
@@ -309,8 +310,21 @@ impl Meme {
     /// # Errors
     ///
     /// Returns an error if the read operation fails.
-    pub async fn get_all(&self) -> Result<Vec<MemoryEntry>> {
+    pub async fn list(&self) -> Result<Vec<Memory>> {
         self.store.get_all(&self.scope).await
+    }
+
+    /// Execute the full hybrid retrieval pipeline (planning + multi-view search).
+    ///
+    /// Unlike [`search`](Self::search) which only does semantic ANN,
+    /// this method uses intent-aware planning, keyword search, structured
+    /// metadata filtering, and optional reflection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if retrieval fails.
+    pub async fn retrieve(&self, query: &str) -> Result<Vec<Memory>> {
+        self.retriever.retrieve(query).await
     }
 
     /// Count stored memory entries.
@@ -337,8 +351,8 @@ impl Meme {
         &self.config
     }
 
-    async fn ingest_entries(&self, entries: &[MemoryEntry]) -> Result<()> {
-        let mut scoped: Vec<MemoryEntry> = entries.to_vec();
+    async fn ingest_entries(&self, entries: &[Memory]) -> Result<()> {
+        let mut scoped: Vec<Memory> = entries.to_vec();
         for entry in &mut scoped {
             if entry.user_id.is_none() {
                 entry.user_id.clone_from(&self.scope.user_id);
@@ -348,7 +362,7 @@ impl Meme {
             }
         }
 
-        let texts: Vec<&str> = scoped.iter().map(|e| e.restatement.as_str()).collect();
+        let texts: Vec<&str> = scoped.iter().map(|e| e.content.as_str()).collect();
         let vectors = self.embedder.encode_documents(&texts).await?;
 
         let existing_count = self.store.count(&self.scope).await?;
@@ -390,7 +404,7 @@ impl Meme {
         Ok(())
     }
 
-    async fn record_history_batch(&self, entries: &[MemoryEntry], event_type: EventType) {
+    async fn record_history_batch(&self, entries: &[Memory], event_type: EventType) {
         for entry in entries {
             if let Err(e) = self
                 .history
@@ -398,7 +412,7 @@ impl Meme {
                     entry.id,
                     event_type,
                     None,
-                    Some(&entry.restatement),
+                    Some(&entry.content),
                     &self.scope,
                 )
                 .await

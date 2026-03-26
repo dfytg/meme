@@ -11,7 +11,7 @@ use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::error::{Error, Result};
-use crate::model::{MemoryEntry, MetadataFilter, Scope};
+use crate::model::{Memory, MetadataFilter, Scope};
 
 /// Build a SQL WHERE clause fragment for a [`Scope`].
 /// Returns `None` if no scope is set.
@@ -144,7 +144,7 @@ impl VectorStore {
         }
     }
 
-    fn batch_to_entries(batch: &RecordBatch) -> Vec<MemoryEntry> {
+    fn batch_to_entries(batch: &RecordBatch) -> Vec<Memory> {
         let col = |name| -> Option<&StringArray> {
             batch
                 .column_by_name(name)
@@ -164,9 +164,9 @@ impl VectorStore {
         (0..batch.num_rows())
             .map(|i| {
                 let id_str = str_val(id_col, i);
-                MemoryEntry {
+                Memory {
                     id: uuid::Uuid::parse_str(&id_str).unwrap_or_else(|_| uuid::Uuid::new_v4()),
-                    restatement: str_val(rest_col, i),
+                    content: str_val(rest_col, i),
                     keywords: str_val(kw_col, i)
                         .split("||")
                         .map(str::trim)
@@ -204,7 +204,7 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the table cannot be opened or data insertion fails.
-    pub async fn add_entries(&self, entries: &[MemoryEntry], vectors: &[Vec<f32>]) -> Result<()> {
+    pub async fn add_entries(&self, entries: &[Memory], vectors: &[Vec<f32>]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -227,13 +227,13 @@ impl VectorStore {
 
         let n = entries.len();
         let schema = self.build_schema();
-        let col = |f: fn(&MemoryEntry) -> String| -> ArrayRef {
+        let col = |f: fn(&Memory) -> String| -> ArrayRef {
             Arc::new(StringArray::from(entries.iter().map(f).collect::<Vec<_>>()))
         };
 
         let columns: Vec<ArrayRef> = vec![
             col(|e| e.id.to_string()),
-            col(|e| e.restatement.clone()),
+            col(|e| e.content.clone()),
             col(|e| e.keywords.join("||")),
             col(|e| e.timestamp.map(|ts| ts.to_rfc3339()).unwrap_or_default()),
             col(|e| e.location.clone().unwrap_or_default()),
@@ -267,7 +267,7 @@ impl VectorStore {
         query_vec: &[f32],
         top_k: usize,
         scope: &Scope,
-    ) -> Result<Vec<MemoryEntry>> {
+    ) -> Result<Vec<Memory>> {
         let table = self.get_table().await?;
         if table.count_rows(None).await? == 0 {
             return Ok(Vec::new());
@@ -290,7 +290,7 @@ impl VectorStore {
         keywords: &[String],
         top_k: usize,
         scope: &Scope,
-    ) -> Result<Vec<MemoryEntry>> {
+    ) -> Result<Vec<Memory>> {
         if keywords.is_empty() {
             return Ok(Vec::new());
         }
@@ -350,7 +350,7 @@ impl VectorStore {
         filter: &MetadataFilter,
         top_k: usize,
         scope: &Scope,
-    ) -> Result<Vec<MemoryEntry>> {
+    ) -> Result<Vec<Memory>> {
         if filter.is_empty() {
             return Ok(Vec::new());
         }
@@ -410,7 +410,7 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the read operation fails.
-    pub async fn get_all(&self, scope: &Scope) -> Result<Vec<MemoryEntry>> {
+    pub async fn get_all(&self, scope: &Scope) -> Result<Vec<Memory>> {
         let table = self.get_table().await?;
         let mut q = table.query();
         if let Some(clause) = scope_to_where_clause(scope) {
@@ -424,10 +424,7 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the read operation fails.
-    pub async fn get_all_with_vectors(
-        &self,
-        scope: &Scope,
-    ) -> Result<Vec<(MemoryEntry, Vec<f32>)>> {
+    pub async fn get_all_with_vectors(&self, scope: &Scope) -> Result<Vec<(Memory, Vec<f32>)>> {
         let table = self.get_table().await?;
         let mut q = table.query();
         if let Some(clause) = scope_to_where_clause(scope) {
@@ -449,7 +446,7 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the query fails.
-    pub async fn get_by_id(&self, id: uuid::Uuid) -> Result<Option<MemoryEntry>> {
+    pub async fn get_by_id(&self, id: uuid::Uuid) -> Result<Option<Memory>> {
         let table = self.get_table().await?;
         let stream = table
             .query()
@@ -466,7 +463,7 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the delete or insert fails.
-    pub async fn update_entry(&self, entry: &MemoryEntry, vector: &[f32]) -> Result<()> {
+    pub async fn update_entry(&self, entry: &Memory, vector: &[f32]) -> Result<()> {
         self.delete_entries(&[entry.id.to_string()]).await?;
         self.add_entries(std::slice::from_ref(entry), &[vector.to_vec()])
             .await
@@ -513,7 +510,7 @@ impl VectorStore {
         stream: impl futures::Stream<Item = std::result::Result<RecordBatch, lancedb::Error>>
         + Send
         + Unpin,
-    ) -> Result<Vec<MemoryEntry>> {
+    ) -> Result<Vec<Memory>> {
         let batches: Vec<RecordBatch> = stream.try_collect().await?;
         Ok(batches.iter().flat_map(Self::batch_to_entries).collect())
     }
@@ -569,7 +566,7 @@ impl VectorStore {
         }
 
         let t0 = std::time::Instant::now();
-        let (entries, vectors): (Vec<MemoryEntry>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
+        let (entries, vectors): (Vec<Memory>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
         let n = entries.len();
 
         let now = chrono::Utc::now();
@@ -613,7 +610,7 @@ impl VectorStore {
                     .map(|neighbors| (i, neighbors))
             }
         });
-        let all_neighbors: Vec<(usize, Vec<MemoryEntry>)> =
+        let all_neighbors: Vec<(usize, Vec<Memory>)> =
             futures::future::try_join_all(ann_futures).await?;
 
         // Process neighbors sequentially (mutates `dead`).
@@ -681,7 +678,7 @@ pub struct ConsolidationStats {
     pub duration_secs: f64,
 }
 
-fn scope_matches(entry: &MemoryEntry, scope: &Scope) -> bool {
+fn scope_matches(entry: &Memory, scope: &Scope) -> bool {
     if let Some(uid) = &scope.user_id
         && entry.user_id.as_deref() != Some(uid.as_str())
     {
@@ -891,14 +888,14 @@ mod tests {
 
     #[test]
     fn scope_matches_no_scope() {
-        let e = MemoryEntry::new("test");
+        let e = Memory::new("test");
         let s = Scope::default();
         assert!(scope_matches(&e, &s));
     }
 
     #[test]
     fn scope_matches_user_hit() {
-        let mut e = MemoryEntry::new("test");
+        let mut e = Memory::new("test");
         e.user_id = Some("alice".into());
         let s = Scope {
             user_id: Some("alice".into()),
@@ -909,7 +906,7 @@ mod tests {
 
     #[test]
     fn scope_matches_user_miss() {
-        let mut e = MemoryEntry::new("test");
+        let mut e = Memory::new("test");
         e.user_id = Some("bob".into());
         let s = Scope {
             user_id: Some("alice".into()),

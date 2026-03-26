@@ -44,9 +44,9 @@ impl std::fmt::Display for EventType {
     }
 }
 
-/// A recorded history event for a single memory entry.
+/// A recorded history event for a single memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryEvent {
+pub struct Event {
     /// Auto-generated event ID.
     pub id: Uuid,
     /// The memory entry this event relates to.

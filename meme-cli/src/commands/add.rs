@@ -106,7 +106,7 @@ impl AddCmd {
         let count = dialogues.len();
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
         meme.add_dialogues(dialogues).await?;
-        meme.finalize().await?;
+        meme.flush().await?;
 
         println!("Imported {count} dialogues from {path}");
         Ok(())

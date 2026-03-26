@@ -47,14 +47,14 @@ impl SearchCmd {
                 return Ok(());
             }
             let mut table = Table::new();
-            table.set_header(vec!["#", "ID", "Restatement", "Persons", "Topic"]);
+            table.set_header(vec!["#", "ID", "Content", "Persons", "Topic"]);
 
             for (i, entry) in shown.iter().enumerate() {
-                let restatement = super::truncate_str(&entry.restatement, 60);
+                let content = super::truncate_str(&entry.content, 60);
                 table.add_row(vec![
                     Cell::new(i + 1),
                     Cell::new(&entry.id.to_string()[..8]),
-                    Cell::new(restatement),
+                    Cell::new(content),
                     Cell::new(entry.persons.join(", ")),
                     Cell::new(entry.topic.as_deref().unwrap_or("")),
                 ]);

@@ -27,7 +27,7 @@ impl ExportCmd {
     pub async fn run(&self) -> anyhow::Result<()> {
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
 
-        let entries = meme.get_all().await?;
+        let entries = meme.list().await?;
 
         let json = serde_json::to_string_pretty(&entries)?;
 
@@ -65,7 +65,7 @@ impl ImportCmd {
     /// Returns an error if the import fails.
     pub async fn run(&self) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(&self.file)?;
-        let mut entries: Vec<meme::model::MemoryEntry> = serde_json::from_str(&content)?;
+        let entries: Vec<meme::Memory> = serde_json::from_str(&content)?;
 
         let count = entries.len();
         println!(
@@ -74,7 +74,7 @@ impl ImportCmd {
         );
 
         let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
-        meme.import_entries(&mut entries).await?;
+        meme.import(&entries).await?;
 
         println!("Imported {count} entries successfully.");
         Ok(())

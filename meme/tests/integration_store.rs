@@ -1,6 +1,6 @@
 //! Integration tests for `LanceDB`-backed `VectorStore`.
 
-use meme::model::{MemoryEntry, MetadataFilter, Scope};
+use meme::model::{Memory, MetadataFilter, Scope};
 use meme::store::VectorStore;
 
 async fn temp_store(dim: usize) -> VectorStore {
@@ -10,8 +10,8 @@ async fn temp_store(dim: usize) -> VectorStore {
         .expect("failed to open test store")
 }
 
-fn dummy_entry(text: &str) -> MemoryEntry {
-    let mut e = MemoryEntry::new(text);
+fn dummy_entry(text: &str) -> Memory {
+    let mut e = Memory::new(text);
     e.keywords = vec!["test".into()];
     e.persons = vec!["Alice".into()];
     e
@@ -72,7 +72,7 @@ async fn semantic_search_returns_results() {
 
     let results = store.semantic_search(&v1, 5, &scope).await.unwrap();
     assert!(!results.is_empty());
-    assert_eq!(results[0].restatement, "The weather is sunny today");
+    assert_eq!(results[0].content, "The weather is sunny today");
 }
 
 #[tokio::test]
@@ -92,7 +92,7 @@ async fn keyword_search_like_fallback() {
         .await
         .unwrap();
     assert!(
-        results.iter().any(|e| e.restatement.contains("Tokyo")),
+        results.iter().any(|e| e.content.contains("Tokyo")),
         "expected keyword match for Tokyo"
     );
 }
@@ -135,7 +135,7 @@ async fn delete_entries_by_id() {
     assert_eq!(store.count(&scope).await.unwrap(), 1);
 
     let remaining = store.get_all(&scope).await.unwrap();
-    assert_eq!(remaining[0].restatement, "To be kept");
+    assert_eq!(remaining[0].content, "To be kept");
 }
 
 #[tokio::test]
@@ -166,7 +166,7 @@ async fn scoped_isolation() {
     assert_eq!(store.count(&Scope::default()).await.unwrap(), 2);
 
     let results_a = store.get_all(&scope_a).await.unwrap();
-    assert_eq!(results_a[0].restatement, "User A data");
+    assert_eq!(results_a[0].content, "User A data");
 }
 
 #[tokio::test]
@@ -191,7 +191,7 @@ async fn scoped_clear() {
 
     assert_eq!(store.count(&Scope::default()).await.unwrap(), 1);
     let remaining = store.get_all(&Scope::default()).await.unwrap();
-    assert_eq!(remaining[0].restatement, "User B data");
+    assert_eq!(remaining[0].content, "User B data");
 }
 
 #[tokio::test]
@@ -251,7 +251,7 @@ async fn get_all_with_vectors_roundtrip() {
     let scope = Scope::default();
     let pairs = store.get_all_with_vectors(&scope).await.unwrap();
     assert_eq!(pairs.len(), 1);
-    assert_eq!(pairs[0].0.restatement, "roundtrip");
+    assert_eq!(pairs[0].0.content, "roundtrip");
     for (a, b) in pairs[0].1.iter().zip(v.iter()) {
         assert!((a - b).abs() < 1e-5);
     }
@@ -270,14 +270,14 @@ async fn update_entry_replaces_content() {
         .unwrap();
 
     let mut updated = store.get_by_id(id).await.unwrap().unwrap();
-    assert_eq!(updated.restatement, "original text");
+    assert_eq!(updated.content, "original text");
 
-    updated.restatement = "updated text".to_owned();
+    updated.content = "updated text".to_owned();
     let new_v = vec![0.5, 0.6, 0.7, 0.8];
     store.update_entry(&updated, &new_v).await.unwrap();
 
     let fetched = store.get_by_id(id).await.unwrap().unwrap();
-    assert_eq!(fetched.restatement, "updated text");
+    assert_eq!(fetched.content, "updated text");
     assert_eq!(store.count(&scope).await.unwrap(), 1);
 }
 

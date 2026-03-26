@@ -13,7 +13,7 @@ use crate::llm::{
     ChatOptions, CompletenessResponse, LlmClient, Message, MissingQueriesResponse, QueryPlan,
     prompt,
 };
-use crate::model::{MemoryEntry, MetadataFilter, Scope};
+use crate::model::{Memory, MetadataFilter, Scope};
 use crate::store::VectorStore;
 
 /// Hybrid retriever that combines semantic, lexical, and symbolic search
@@ -74,7 +74,7 @@ impl HybridRetriever {
     ///
     /// Returns an error if any retrieval step fails.
     #[tracing::instrument(skip(self))]
-    pub async fn retrieve(&self, query: &str) -> Result<Vec<MemoryEntry>> {
+    pub async fn retrieve(&self, query: &str) -> Result<Vec<Memory>> {
         if self.enable_planning {
             self.retrieve_with_planning(query).await
         } else {
@@ -83,7 +83,7 @@ impl HybridRetriever {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn retrieve_with_planning(&self, query: &str) -> Result<Vec<MemoryEntry>> {
+    async fn retrieve_with_planning(&self, query: &str) -> Result<Vec<Memory>> {
         let plan = self.plan_query(query).await?;
 
         let mut search_queries = plan.search_queries.clone();
@@ -113,14 +113,14 @@ impl HybridRetriever {
         Ok(merged)
     }
 
-    async fn semantic_search(&self, query: &str) -> Result<Vec<MemoryEntry>> {
+    async fn semantic_search(&self, query: &str) -> Result<Vec<Memory>> {
         let query_vec = self.embedder.encode_query(query).await?;
         self.store
             .semantic_search(&query_vec, self.semantic_top_k, &self.scope)
             .await
     }
 
-    async fn keyword_search(&self, query: &str, plan: &QueryPlan) -> Result<Vec<MemoryEntry>> {
+    async fn keyword_search(&self, query: &str, plan: &QueryPlan) -> Result<Vec<Memory>> {
         let keywords = if plan.keywords.is_empty() {
             vec![query.to_owned()]
         } else {
@@ -131,7 +131,7 @@ impl HybridRetriever {
             .await
     }
 
-    async fn structured_search(&self, plan: &QueryPlan) -> Result<Vec<MemoryEntry>> {
+    async fn structured_search(&self, plan: &QueryPlan) -> Result<Vec<Memory>> {
         let persons = Some(&plan.persons).filter(|v| !v.is_empty()).cloned();
         let entities = Some(&plan.entities).filter(|v| !v.is_empty()).cloned();
         let timestamp_range = plan
@@ -153,7 +153,7 @@ impl HybridRetriever {
             .await
     }
 
-    async fn execute_semantic_searches(&self, queries: &[String]) -> Result<Vec<MemoryEntry>> {
+    async fn execute_semantic_searches(&self, queries: &[String]) -> Result<Vec<Memory>> {
         if queries.is_empty() {
             return Ok(Vec::new());
         }
@@ -219,9 +219,9 @@ impl HybridRetriever {
     async fn reflect(
         &self,
         query: &str,
-        initial_results: Vec<MemoryEntry>,
+        initial_results: Vec<Memory>,
         plan: &QueryPlan,
-    ) -> Result<Vec<MemoryEntry>> {
+    ) -> Result<Vec<Memory>> {
         let mut current = initial_results;
         let required_info = plan.required_info.join(", ");
 
@@ -306,7 +306,7 @@ impl HybridRetriever {
     }
 }
 
-fn deduplicate(entries: Vec<MemoryEntry>) -> Vec<MemoryEntry> {
+fn deduplicate(entries: Vec<Memory>) -> Vec<Memory> {
     let mut seen = HashSet::new();
     entries.into_iter().filter(|e| seen.insert(e.id)).collect()
 }
@@ -496,8 +496,8 @@ mod tests {
 
     #[test]
     fn deduplicate_removes_dups() {
-        let e1 = MemoryEntry::new("fact one");
-        let e2 = MemoryEntry::new("fact two");
+        let e1 = Memory::new("fact one");
+        let e2 = Memory::new("fact two");
         let e1_dup = e1.clone();
         let results = deduplicate(vec![e1.clone(), e2.clone(), e1_dup]);
         assert_eq!(results.len(), 2);
@@ -513,11 +513,7 @@ mod tests {
 
     #[test]
     fn deduplicate_no_dups() {
-        let entries = vec![
-            MemoryEntry::new("a"),
-            MemoryEntry::new("b"),
-            MemoryEntry::new("c"),
-        ];
+        let entries = vec![Memory::new("a"), Memory::new("b"), Memory::new("c")];
         assert_eq!(deduplicate(entries).len(), 3);
     }
 }

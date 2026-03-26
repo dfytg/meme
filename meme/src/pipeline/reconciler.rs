@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::error::Result;
 use crate::llm::{self, ChatOptions, LlmClient, Message, ReconcileResponse};
-use crate::model::{MemoryEntry, Scope};
+use crate::model::{Memory, Scope};
 use crate::store::VectorStore;
 
 /// Reconcile new entries against existing memories using the LLM.
@@ -25,18 +25,18 @@ pub async fn reconcile(
     llm: &LlmClient,
     store: &VectorStore,
     scope: &Scope,
-    entries: &[MemoryEntry],
+    entries: &[Memory],
     vectors: &[Vec<f32>],
-) -> Result<(Vec<MemoryEntry>, Vec<Vec<f32>>, Vec<(Uuid, String)>)> {
+) -> Result<(Vec<Memory>, Vec<Vec<f32>>, Vec<(Uuid, String)>)> {
     let similarity_top_k = 5;
 
-    let new_facts: Vec<&str> = entries.iter().map(|e| e.restatement.as_str()).collect();
+    let new_facts: Vec<&str> = entries.iter().map(|e| e.content.as_str()).collect();
 
     let ann_futures: Vec<_> = vectors
         .iter()
         .map(|vec_i| store.semantic_search(vec_i, similarity_top_k, scope))
         .collect();
-    let all_existing: Vec<Vec<MemoryEntry>> = future::try_join_all(ann_futures).await?;
+    let all_existing: Vec<Vec<Memory>> = future::try_join_all(ann_futures).await?;
 
     let mut existing_map: HashMap<Uuid, (usize, String)> = HashMap::new();
     for group in &all_existing {
@@ -44,7 +44,7 @@ pub async fn reconcile(
             let next_idx = existing_map.len();
             existing_map
                 .entry(entry.id)
-                .or_insert_with(|| (next_idx, entry.restatement.clone()));
+                .or_insert_with(|| (next_idx, entry.content.clone()));
         }
     }
 

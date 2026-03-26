@@ -31,7 +31,7 @@ async fn main() -> meme::error::Result<()> {
         None,
     )
     .await?;
-    meme.finalize().await?;
+    meme.flush().await?;
 
     println!("Stored {} memories\n", meme.count().await?);
 

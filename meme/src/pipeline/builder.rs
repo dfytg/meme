@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::config::PipelineConfig;
 use crate::error::{Error, Result};
 use crate::llm::{ChatOptions, ExtractionResponse, LlmClient, Message, prompt};
-use crate::model::{Dialogue, MemoryEntry};
+use crate::model::{Dialogue, Memory};
 
 /// Memory builder that implements Stage 1 (Semantic Structured Compression)
 /// and Stage 2 (Online Semantic Synthesis) of the `SimpleMem` pipeline.
@@ -21,7 +21,7 @@ pub struct MemoryBuilder {
     custom_extraction_prompt: Option<String>,
     dialogue_buffer: Vec<Dialogue>,
     processed_count: usize,
-    previous_entries: Vec<MemoryEntry>,
+    previous_entries: Vec<Memory>,
 }
 
 impl std::fmt::Debug for MemoryBuilder {
@@ -68,7 +68,7 @@ impl MemoryBuilder {
     ///
     /// Returns an error if LLM extraction fails.
     #[tracing::instrument(skip(self, dialogue))]
-    pub async fn add_dialogue(&mut self, dialogue: Dialogue) -> Result<Vec<MemoryEntry>> {
+    pub async fn add_dialogue(&mut self, dialogue: Dialogue) -> Result<Vec<Memory>> {
         self.dialogue_buffer.push(dialogue);
         if self.dialogue_buffer.len() >= self.window_size {
             return self.process_window().await;
@@ -84,7 +84,7 @@ impl MemoryBuilder {
     ///
     /// Returns an error if LLM extraction fails.
     #[tracing::instrument(skip(self, dialogues), fields(count = dialogues.len()))]
-    pub async fn add_dialogues(&mut self, dialogues: Vec<Dialogue>) -> Result<Vec<MemoryEntry>> {
+    pub async fn add_dialogues(&mut self, dialogues: Vec<Dialogue>) -> Result<Vec<Memory>> {
         if dialogues.len() > self.window_size * 2 {
             return self.add_dialogues_parallel(dialogues).await;
         }
@@ -104,7 +104,7 @@ impl MemoryBuilder {
     ///
     /// Returns an error if LLM extraction fails.
     #[tracing::instrument(skip(self), fields(remaining = self.dialogue_buffer.len()))]
-    pub async fn finalize(&mut self) -> Result<Vec<MemoryEntry>> {
+    pub async fn finalize(&mut self) -> Result<Vec<Memory>> {
         if self.dialogue_buffer.is_empty() {
             return Ok(Vec::new());
         }
@@ -131,7 +131,7 @@ impl MemoryBuilder {
         self.dialogue_buffer.len()
     }
 
-    async fn process_window(&mut self) -> Result<Vec<MemoryEntry>> {
+    async fn process_window(&mut self) -> Result<Vec<Memory>> {
         if self.dialogue_buffer.is_empty() {
             return Ok(Vec::new());
         }
@@ -155,10 +155,7 @@ impl MemoryBuilder {
         Ok(entries)
     }
 
-    async fn add_dialogues_parallel(
-        &mut self,
-        dialogues: Vec<Dialogue>,
-    ) -> Result<Vec<MemoryEntry>> {
+    async fn add_dialogues_parallel(&mut self, dialogues: Vec<Dialogue>) -> Result<Vec<Memory>> {
         self.dialogue_buffer.extend(dialogues);
         let total_dialogues = self.dialogue_buffer.len();
 
@@ -235,7 +232,7 @@ impl MemoryBuilder {
         Ok(all_entries)
     }
 
-    async fn generate_entries(&self, dialogues: &[Dialogue]) -> Result<Vec<MemoryEntry>> {
+    async fn generate_entries(&self, dialogues: &[Dialogue]) -> Result<Vec<Memory>> {
         let context = prompt::extraction_context(&self.previous_entries);
         generate_entries_standalone(
             &self.llm,
@@ -252,7 +249,7 @@ async fn generate_entries_standalone(
     dialogues: &[Dialogue],
     context: &str,
     custom_prompt: Option<&str>,
-) -> Result<Vec<MemoryEntry>> {
+) -> Result<Vec<Memory>> {
     let dialogue_text: String = dialogues
         .iter()
         .map(ToString::to_string)

@@ -3,7 +3,7 @@
 use crate::config::PipelineConfig;
 use crate::error::Result;
 use crate::llm::{AnswerResponse, ChatOptions, LlmClient, Message, prompt};
-use crate::model::MemoryEntry;
+use crate::model::Memory;
 
 /// Generate an answer for a query given retrieved contexts.
 ///
@@ -16,14 +16,14 @@ use crate::model::MemoryEntry;
 pub async fn generate(
     llm: &LlmClient,
     query: &str,
-    contexts: &[MemoryEntry],
+    contexts: &[Memory],
     pipeline_cfg: &PipelineConfig,
 ) -> Result<String> {
     if contexts.is_empty() {
         return Ok("No relevant information found".to_owned());
     }
 
-    let mut sorted: Vec<&MemoryEntry> = contexts.iter().collect();
+    let mut sorted: Vec<&Memory> = contexts.iter().collect();
     sorted.sort_by_key(|e| e.timestamp);
     let context_str = prompt::format_contexts(&sorted);
 

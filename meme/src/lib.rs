@@ -23,13 +23,14 @@
 //!
 //! // Dialogue-based ingestion
 //! meme.add_dialogue("Alice", "Let's meet at 2pm tomorrow", None).await?;
-//! meme.finalize().await?;
+//! meme.flush().await?;
 //!
 //! // Direct fact ingestion (skips dialogue windowing)
 //! meme.add("Alice prefers coffee over tea").await?;
 //!
-//! // CRUD
+//! // Retrieval
 //! let results = meme.search("Alice meeting").await?;
+//! let contexts = meme.retrieve("When will Alice meet?").await?;
 //! let answer = meme.ask("When will Alice meet?").await?;
 //! # Ok(())
 //! # }
@@ -52,3 +53,4 @@ pub mod store;
 
 pub use builder::MemeBuilder;
 pub use facade::Meme;
+pub use model::{Dialogue, Event, EventType, Memory, Scope};

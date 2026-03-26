@@ -7,7 +7,7 @@ mod filter;
 mod scope;
 
 pub use dialogue::Dialogue;
-pub use entry::MemoryEntry;
-pub use event::{EventType, MemoryEvent};
+pub use entry::Memory;
+pub use event::{Event, EventType};
 pub use filter::MetadataFilter;
 pub use scope::Scope;

@@ -11,47 +11,30 @@ repository = "https://github.com/qntx/meme"
 description = "Long term memory for AI agents."
 
 [workspace.dependencies]
-meme = {version = "0.6", path = "meme" }
+meme = { version = "0.6", path = "meme" }
 
-# Async runtime
-tokio = { version = "1.50.0", features = ["full"] }
-futures = "0.3.32"
-
-# Serialization
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-
-# HTTP client
-reqwest = { version = "0.13.2", features = ["json", "stream"] }
-
-# Vector database
-lancedb = "0.27.1"
+anyhow = "1"
 arrow = { version = "57", default-features = false }
 arrow-array = "57"
 arrow-schema = "57"
-
-# Embedding (local ONNX via fastembed, optional)
-fastembed = "5.12.1"
-
-# CLI
+chrono = { version = "0.4.44", features = ["serde"] }
 clap = { version = "4.6.0", features = ["derive"] }
 comfy-table = "7.2.2"
-
-# Config
-toml = "1.1.0+spec-1.1.0"
 directories = "6.0.0"
-
-# SQLite (history store)
+fastembed = "5.12.1"
+futures = "0.3.32"
+lancedb = "0.27.1"
+regex = "1.12.3"
+reqwest = { version = "0.13.2", features = ["json", "stream"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
-
-# Utilities
-uuid = { version = "1.22.0", features = ["v4", "serde"] }
-chrono = { version = "0.4.44", features = ["serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+tokio = { version = "1.50.0", features = ["full"] }
+toml = "1.1.0+spec-1.1.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-thiserror = "2.0.18"
-regex = "1.12.3"
-anyhow = "1"
+uuid = { version = "1.22.0", features = ["v4", "serde"] }
 
 [profile.release]
 codegen-units = 1

@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use crate::model::MemoryEntry;
+use crate::model::Memory;
 
 /// Build the extraction prompt for Stage 1 (Semantic Structured Compression).
 ///
@@ -21,7 +21,7 @@ pub fn extraction(dialogue_text: &str, context: &str) -> String {
 1. **Complete Coverage**: Generate enough memory entries to ensure ALL information in the dialogues is captured
 2. **Force Disambiguation**: Absolutely PROHIBIT using pronouns (he, she, it, they, this, that) and relative time (yesterday, today, last week, tomorrow)
 3. **Temporal Anchoring**: Convert ALL relative time references to absolute dates using the dialogue timestamps as reference. E.g., if dialogue is dated "25 May 2023" and speaker says "last Sunday", compute the actual date. If dialogue says "next month", compute the actual month.
-4. **Lossless Information**: Each entry's lossless_restatement must be a complete, independent, understandable sentence
+4. **Lossless Information**: Each entry's lossless_content must be a complete, independent, understandable sentence
 5. **Precise Extraction**:
    - keywords: Core keywords (names, places, entities, topic words)
    - timestamp: Absolute time in ISO 8601 format (if explicit time mentioned in dialogue)
@@ -37,7 +37,7 @@ Return a JSON object containing an "entries" array:
 {{
   "entries": [
     {{
-      "lossless_restatement": "Complete unambiguous restatement (must include all subjects, objects, time, location, etc.)",
+      "lossless_content": "Complete unambiguous content (must include all subjects, objects, time, location, etc.)",
       "keywords": ["keyword1", "keyword2"],
       "timestamp": "YYYY-MM-DDTHH:MM:SSZ or null",
       "location": "location name or null",
@@ -81,14 +81,14 @@ Return ONLY the JSON object."#
 
 /// Build the previous-window context string for extraction.
 #[must_use]
-pub fn extraction_context(previous_entries: &[MemoryEntry]) -> String {
+pub fn extraction_context(previous_entries: &[Memory]) -> String {
     if previous_entries.is_empty() {
         return String::new();
     }
     let mut ctx =
         "\n[Previous Window Memory Entries (for reference to avoid duplication)]\n".to_owned();
     for entry in previous_entries.iter().take(3) {
-        let _ = writeln!(ctx, "- {}", entry.restatement);
+        let _ = writeln!(ctx, "- {}", entry.content);
     }
     ctx
 }
@@ -265,7 +265,7 @@ Return ONLY the JSON object."#
 
 /// Format memory entries as context string for answer generation.
 #[must_use]
-pub fn format_contexts(entries: &[&MemoryEntry]) -> String {
+pub fn format_contexts(entries: &[&Memory]) -> String {
     entries
         .iter()
         .enumerate()
@@ -274,9 +274,9 @@ pub fn format_contexts(entries: &[&MemoryEntry]) -> String {
         .join("\n\n")
 }
 
-fn format_single_context(i: usize, e: &MemoryEntry) -> String {
+fn format_single_context(i: usize, e: &Memory) -> String {
     let mut parts = vec![format!("[Context {}]", i + 1)];
-    parts.push(format!("Content: {}", e.restatement));
+    parts.push(format!("Content: {}", e.content));
     if let Some(ts) = e.timestamp {
         parts.push(format!("Time: {}", ts.format("%d %B %Y %H:%M")));
     }
@@ -297,12 +297,12 @@ fn format_single_context(i: usize, e: &MemoryEntry) -> String {
 
 /// Format entries compactly for reflection/completeness checks.
 #[must_use]
-pub fn format_contexts_compact(entries: &[MemoryEntry]) -> String {
+pub fn format_contexts_compact(entries: &[Memory]) -> String {
     entries
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let mut line = format!("[Info {}] {}", i + 1, e.restatement);
+            let mut line = format!("[Info {}] {}", i + 1, e.content);
             if let Some(ts) = e.timestamp {
                 let _ = write!(line, " | Time: {}", ts.format("%+"));
             }

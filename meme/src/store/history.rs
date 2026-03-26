@@ -11,7 +11,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
-use crate::model::{EventType, MemoryEvent, Scope};
+use crate::model::{Event, EventType, Scope};
 
 /// Persistent store for memory lifecycle events backed by `SQLite`.
 pub struct HistoryStore {
@@ -74,8 +74,8 @@ impl HistoryStore {
         old_content: Option<&str>,
         new_content: Option<&str>,
         scope: &Scope,
-    ) -> Result<MemoryEvent> {
-        let event = MemoryEvent {
+    ) -> Result<Event> {
+        let event = Event {
             id: Uuid::new_v4(),
             memory_id,
             event_type,
@@ -121,7 +121,7 @@ impl HistoryStore {
     /// # Panics
     ///
     /// Panics if the internal mutex is poisoned.
-    pub async fn get_history(&self, memory_id: Uuid, scope: &Scope) -> Result<Vec<MemoryEvent>> {
+    pub async fn get_history(&self, memory_id: Uuid, scope: &Scope) -> Result<Vec<Event>> {
         let conn = Arc::clone(&self.conn);
         let mid = memory_id.to_string();
         let uid = scope.user_id.clone();
@@ -154,7 +154,7 @@ impl HistoryStore {
     }
 }
 
-/// Intermediate row type for `SQLite` → `MemoryEvent` conversion.
+/// Intermediate row type for `SQLite` → `Event` conversion.
 struct RawEvent {
     event_id: String,
     memory_id: String,
@@ -165,8 +165,8 @@ struct RawEvent {
 }
 
 impl RawEvent {
-    fn into_event(self) -> MemoryEvent {
-        MemoryEvent {
+    fn into_event(self) -> Event {
+        Event {
             id: Uuid::parse_str(&self.event_id).unwrap_or_else(|_| Uuid::new_v4()),
             memory_id: Uuid::parse_str(&self.memory_id).unwrap_or_else(|_| Uuid::new_v4()),
             event_type: EventType::from_db_str(&self.event_type),

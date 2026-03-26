@@ -1,4 +1,6 @@
-# meme
+<!-- markdownlint-disable MD033 MD041 MD036 -->
+
+# MEME
 
 [![Crates.io][meme-crate]][meme-crate-url]
 [![Documentation][meme-doc]][meme-doc-url]

@@ -211,7 +211,7 @@ impl RunCmd {
         meme.add_dialogues(dialogues)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
-        meme.finalize().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        meme.flush().await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
         let stored = meme.count().await.map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("  Stored {stored} memory entries");
