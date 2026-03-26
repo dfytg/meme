@@ -1,7 +1,9 @@
-//! Stage 1+2: Extractor — Semantic Structured Compression + Online Semantic Synthesis.
+//! Stage 1: Semantic Structured Compression.
 //!
-//! Processes dialogue windows through an LLM to extract structured, atomic memory entries.
-//! Supports parallel processing of multiple windows via tokio tasks.
+//! The [`Extractor`] buffers incoming dialogues, splits them into overlapping
+//! windows, and sends each window to an LLM that produces atomic, self-contained
+//! [`Memory`](crate::model::Memory) entries.  Large batches are processed in
+//! parallel via tokio tasks bounded by a semaphore.
 
 use std::sync::Arc;
 
@@ -11,7 +13,7 @@ use crate::llm::{ChatOptions, ExtractionResponse, LlmClient, Message, prompt};
 use crate::model::{Dialogue, Memory};
 
 /// Dialogue-to-memory extractor implementing Stage 1 (Semantic Structured Compression)
-/// and Stage 2 (Online Semantic Synthesis) of the pipeline.
+/// of the pipeline.
 pub struct Extractor {
     llm: Arc<LlmClient>,
     window_size: usize,

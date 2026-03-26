@@ -2,12 +2,22 @@
 //!
 //! Long-term memory for AI agents.
 //!
-//! A Rust implementation of a production-grade memory pipeline:
-//! 1. **Semantic Structured Compression** — dialogues → compact memory entries
-//! 2. **Lifecycle Reconciliation** — LLM-driven ADD/UPDATE/DELETE/NOOP
-//! 3. **Intent-Aware Retrieval Planning** — multi-view hybrid retrieval
+//! `meme` is a production-grade memory pipeline written in Rust.  It persists
+//! knowledge extracted from conversations (or raw facts) to disk via
+//! [LanceDB](https://lancedb.com) and tracks every change in a `SQLite`e` audit log.
 //!
-//! Memory is persistent across sessions — the vector store is stored on disk.
+//! ## Pipeline
+//!
+//! 1. **Semantic Structured Compression** — dialogues are windowed and sent to
+//!    an LLM which extracts atomic, self-contained [`Memory`] entries with
+//!    structured metadata (timestamps, locations, persons, keywords, …).
+//! 2. **Lifecycle Reconciliation** — each new entry is compared against existing
+//!    memories in a single LLM call that decides ADD / UPDATE / DELETE / NOOP,
+//!    preventing duplicates and resolving contradictions.
+//! 3. **Intent-Aware Hybrid Retrieval** — queries are analyzed by an LLM to
+//!    produce a retrieval plan that drives parallel semantic (ANN), lexical
+//!    (FTS), and structured-metadata searches.  Optional reflection rounds
+//!    iteratively refine coverage.
 //!
 //! ## Quick Start
 //!
@@ -21,22 +31,54 @@
 //!     .build()
 //!     .await?;
 //!
-//! // Add a conversation
+//! // Ingest a conversation
 //! meme.add(&[
 //!     Dialogue::new("Alice", "Let's meet at 2pm tomorrow"),
 //!     Dialogue::new("Bob", "Sure, see you at Shibuya station"),
 //! ]).await?;
 //! meme.flush().await?;
 //!
-//! // Store a fact directly
+//! // Store a fact directly (bypasses dialogue windowing)
 //! meme.put("Alice prefers coffee over tea").await?;
 //!
-//! // Search & Q&A
-//! let results = meme.search("Alice meeting").await?;
-//! let answer = meme.ask("When will Alice meet?").await?;
+//! // Hybrid search & Q&A
+//! let memories = meme.search("Alice meeting").await?;
+//! let answer  = meme.ask("When will Alice meet?").await?;
+//!
+//! // CRUD
+//! let all = meme.list().await?;
+//! meme.update(all[0].id, "corrected content").await?;
+//! meme.delete(all[0].id).await?;
+//!
+//! // Audit trail
+//! let events = meme.history(all[0].id).await?;
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! ## Public API
+//!
+//! | Entry point | Purpose |
+//! |---|---|
+//! | [`MemeBuilder`] | Fluent builder — configure API key, model, storage path, scoping |
+//! | [`Meme`] | Runtime facade — `add`, `flush`, `put`, `search`, `ask`, CRUD, `consolidate` |
+//! | [`Memory`] | A single self-contained unit of knowledge |
+//! | [`Dialogue`] | Speaker + content input for conversation ingestion |
+//! | [`Scope`] | Multi-tenant / multi-session isolation filter |
+//! | [`Event`] / [`EventType`] | Change-history audit records |
+//! | [`ConsolidationStats`] | Summary returned by [`Meme::consolidate`] |
+//!
+//! ## Crate Layout
+//!
+//! | Module | Visibility | Contents |
+//! |---|---|---|
+//! | [`config`] | **pub** | TOML + env-var configuration system |
+//! | [`error`] | **pub** | [`Error`](error::Error) enum and [`Result`](error::Result) alias |
+//! | [`model`] | **pub** | Domain types ([`Memory`], [`Dialogue`], [`Event`], [`Scope`], …) |
+//! | [`store`] | **pub** | LanceDB vector store, SQLite history store, consolidation |
+//! | `embedding` | pub(crate) | API and optional ONNX embedding providers |
+//! | `llm` | pub(crate) | OpenAI-compatible LLM client, prompts, JSON schemas |
+//! | `pipeline` | pub(crate) | Extractor, reconciler, hybrid retriever, answer generator |
 
 #![allow(clippy::missing_fields_in_debug)]
 #![allow(clippy::cast_possible_wrap)]

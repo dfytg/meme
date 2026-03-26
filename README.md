@@ -81,7 +81,7 @@ meme import memories.json
 ### Library
 
 ```rust
-use meme::MemeBuilder;
+use meme::{Dialogue, MemeBuilder};
 
 let meme = MemeBuilder::new()
     .api_key("sk-...")
@@ -89,28 +89,30 @@ let meme = MemeBuilder::new()
     .build()
     .await?;
 
-// Dialogue-based ingestion — automatically extracted into structured memory entries.
-meme.add_dialogue("Alice", "Let's meet at 2pm tomorrow", None).await?;
-meme.add_dialogue("Bob", "Sure, I'll bring the Q3 report", None).await?;
-meme.finalize().await?;
+// Ingest a conversation — automatically extracted into structured memories.
+meme.add(&[
+    Dialogue::new("Alice", "Let's meet at 2pm tomorrow"),
+    Dialogue::new("Bob", "Sure, I'll bring the Q3 report"),
+]).await?;
+meme.flush().await?;
 
-// Direct fact ingestion — bypasses dialogue windowing.
-meme.add("Alice prefers coffee over tea").await?;
+// Store a fact directly (bypasses dialogue windowing).
+meme.put("Alice prefers coffee over tea").await?;
 
-// CRUD operations.
+// Hybrid search & Q&A.
 let results = meme.search("Alice meeting").await?;
+let answer = meme.ask("When will Alice meet?").await?;
+
+// CRUD.
 let entry = meme.get(results[0].id).await?;
 meme.update(results[0].id, "Alice prefers tea over coffee").await?;
 meme.delete(results[0].id).await?;
 
-// Change history tracking.
+// Audit trail.
 let events = meme.history(results[0].id).await?;
-
-// Q&A — hybrid retrieval + LLM answer generation.
-let answer = meme.ask("When will Alice meet?").await?;
 ```
 
-See [`examples/`](meme/examples/) for more: [basic](meme/examples/basic.rs), [batch import](meme/examples/batch_import.rs).
+See [`examples/basic.rs`](meme/examples/basic.rs) for a runnable demo.
 
 ## Feature Flags
 
@@ -203,7 +205,7 @@ flowchart TB
     subgraph Write["Write Path"]
         D["Dialogues / Facts"] --> W[Windowing]
         W --> LLM1["LLM Extraction<br/><i>Semantic Structured Compression</i>"]
-        LLM1 --> E[MemoryEntry]
+        LLM1 --> E[Memory]
         E --> EMB1[Embedding]
         EMB1 --> RC{"LLM Reconciliation<br/><i>ADD / UPDATE / DELETE / NOOP</i>"}
         RC --> VS[(VectorStore<br/>LanceDB)]
@@ -232,7 +234,7 @@ flowchart TB
     VS -.-> S1 & S2 & S3
 ```
 
-Each `MemoryEntry` is a self-contained, unambiguous unit of knowledge stored with three index layers:
+Each `Memory` is a self-contained, unambiguous unit of knowledge stored with three index layers:
 
 | Index Layer | Type | Purpose | Implementation |
 | --- | --- | --- | --- |
@@ -244,11 +246,11 @@ Each `MemoryEntry` is a self-contained, unambiguous unit of knowledge stored wit
 
 ### Stage 1: Semantic Structured Compression
 
-Raw dialogues (or direct facts via `add()`) are split into overlapping windows and sent to an LLM. The LLM extracts **atomic, self-contained memory entries** — each entry is a complete, independent fact with all pronouns resolved and all timestamps converted to absolute ISO 8601 format.
+Raw dialogues (or direct facts via `put()`) are split into overlapping windows and sent to an LLM. The LLM extracts **atomic, self-contained memory entries** — each entry is a complete, independent fact with all pronouns resolved and all timestamps converted to absolute ISO 8601 format.
 
 Each entry contains:
 
-- **Lossless restatement** — complete sentence (no pronouns, no relative time)
+- **Content** — complete, self-contained sentence (no pronouns, no relative time)
 - **Keywords** — core terms for BM25-style lexical matching
 - **Structured metadata** — ISO 8601 timestamp, location, person names, entity names, topic phrase
 

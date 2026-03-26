@@ -1,4 +1,4 @@
-//! Three-stage memory pipeline: compression, synthesis, and retrieval.
+//! Three-stage memory pipeline: compression, reconciliation, and retrieval.
 
 mod extractor;
 pub mod generator;
