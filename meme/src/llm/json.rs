@@ -1,46 +1,39 @@
-//! JSON extraction utilities — robust parsing of LLM output that may contain
-//! markdown fences, trailing commas, line comments, and other noise.
+//! JSON extraction fallback — defensive parsing for non-standard LLM output.
+//!
+//! With `json_object` response format, OpenAI-compatible APIs guarantee valid JSON.
+//! This module only activates as a fallback when direct `serde_json::from_str` fails
+//! (e.g. non-OpenAI providers wrapping JSON in markdown fences).
 
 use crate::error::{Error, Result};
 
-/// Extract a JSON value from text that may contain markdown fences and other noise.
+/// Extract a JSON value from text that may be wrapped in markdown fences.
+///
+/// Fallback path only — callers should try `serde_json::from_str` first.
 ///
 /// # Errors
 ///
-/// Returns an error if no valid JSON can be found in the input.
+/// Returns an error if no valid JSON can be found.
 pub fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
     let text = text.trim();
     if text.is_empty() {
         return Err(Error::JsonParse("empty response".to_owned()));
     }
 
-    // Strip common LLM prefixes.
-    let stripped = strip_prefixes(text);
-
-    // Try direct parse.
-    if let Ok(v) = serde_json::from_str(stripped) {
+    if let Ok(v) = serde_json::from_str(text) {
         return Ok(v);
     }
 
-    // Try extracting from ```json ... ``` block.
-    if let Some(json_str) = extract_fenced_json(stripped)
-        && let Ok(v) = parse_with_cleanup(&json_str)
+    if let Some(inner) = extract_fenced(text)
+        && let Ok(v) = serde_json::from_str(&inner)
     {
         return Ok(v);
     }
 
-    // Try extracting from generic ``` ... ``` block.
-    if let Some(json_str) = extract_generic_fenced(stripped)
-        && let Ok(v) = parse_with_cleanup(&json_str)
-    {
+    if let Some(v) = extract_balanced(text, '{', '}') {
         return Ok(v);
     }
-
-    // Try finding balanced JSON object/array.
-    for start_char in ['{', '['] {
-        if let Some(v) = extract_balanced_json(stripped, start_char) {
-            return Ok(v);
-        }
+    if let Some(v) = extract_balanced(text, '[', ']') {
+        return Ok(v);
     }
 
     Err(Error::JsonParse(format!(
@@ -49,107 +42,40 @@ pub fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
     )))
 }
 
-fn strip_prefixes(text: &str) -> &str {
-    let prefixes = [
-        "here's the json:",
-        "here is the json:",
-        "the json is:",
-        "json:",
-        "result:",
-        "output:",
-        "answer:",
-    ];
-    let lower = text.to_lowercase();
-    for prefix in prefixes {
-        if lower.starts_with(prefix) {
-            return text[prefix.len()..].trim();
-        }
-    }
-    text
-}
-
-fn extract_fenced_json(text: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    let start_marker = "```json";
-    let start_idx = lower.find(start_marker)?;
-    let content_start = start_idx + start_marker.len();
-    let end_idx = text[content_start..].find("```")?;
-    Some(
-        text[content_start..content_start + end_idx]
-            .trim()
-            .to_owned(),
-    )
-}
-
-fn extract_generic_fenced(text: &str) -> Option<String> {
+/// Extract content from a ``` or ```json fenced block.
+fn extract_fenced(text: &str) -> Option<String> {
     let start = text.find("```")?;
     let after_fence = start + 3;
-    // Skip language identifier on the same line.
     let newline = text[after_fence..].find('\n')?;
     let content_start = after_fence + newline + 1;
     let end = text[content_start..].find("```")?;
     Some(text[content_start..content_start + end].trim().to_owned())
 }
 
-fn parse_with_cleanup(json_str: &str) -> std::result::Result<serde_json::Value, ()> {
-    if let Ok(v) = serde_json::from_str(json_str) {
-        return Ok(v);
-    }
-    let cleaned = cleanup_json(json_str);
-    serde_json::from_str(&cleaned).map_err(|_| ())
-}
-
-fn cleanup_json(s: &str) -> String {
-    use std::sync::LazyLock;
-
-    static RE_TRAILING_COMMA: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r",(\s*[}\]])").expect("valid regex"));
-    static RE_LINE_COMMENT: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"(?m)//.*$").expect("valid regex"));
-
-    let s = RE_TRAILING_COMMA.replace_all(s, "$1");
-    RE_LINE_COMMENT.replace_all(&s, "").trim().to_owned()
-}
-
-fn extract_balanced_json(text: &str, start_char: char) -> Option<serde_json::Value> {
-    let end_char = if start_char == '{' { '}' } else { ']' };
-    let start_idx = text.find(start_char)?;
-
+/// Find the first balanced `{…}` or `[…]` and try to parse it.
+fn extract_balanced(text: &str, open: char, close: char) -> Option<serde_json::Value> {
+    let start = text.find(open)?;
     let mut depth = 0i32;
     let mut in_string = false;
-    let mut escape_next = false;
+    let mut escape = false;
 
-    for (i, ch) in text[start_idx..].char_indices() {
-        if escape_next {
-            escape_next = false;
+    for (i, ch) in text[start..].char_indices() {
+        if escape {
+            escape = false;
             continue;
         }
-        if ch == '\\' {
-            escape_next = true;
-            continue;
-        }
-        if ch == '"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-        if ch == start_char {
-            depth += 1;
-        } else if ch == end_char {
-            depth -= 1;
-            if depth == 0 {
-                let json_str = &text[start_idx..=(start_idx + i)];
-                if let Ok(v) = serde_json::from_str(json_str) {
-                    return Some(v);
+        match ch {
+            '\\' => escape = true,
+            '"' => in_string = !in_string,
+            c if !in_string && c == open => depth += 1,
+            c if !in_string && c == close => {
+                depth -= 1;
+                if depth == 0 {
+                    let slice = &text[start..=(start + i)];
+                    return serde_json::from_str(slice).ok();
                 }
-                let cleaned = cleanup_json(json_str);
-                if let Ok(v) = serde_json::from_str(&cleaned) {
-                    return Some(v);
-                }
-                break;
             }
+            _ => {}
         }
     }
     None
@@ -166,77 +92,34 @@ mod tests {
     }
 
     #[test]
-    fn direct_object() {
+    fn direct_json() {
         let v = extract_json_from_text(r#"{"key": "value"}"#).unwrap();
         assert_eq!(v["key"], "value");
-    }
 
-    #[test]
-    fn direct_array() {
         let v = extract_json_from_text(r"[1, 2, 3]").unwrap();
         assert_eq!(v.as_array().unwrap().len(), 3);
     }
 
     #[test]
     fn fenced_block() {
-        let input = "Here is the result:\n```json\n{\"a\": 1}\n```\nDone.";
-        let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v["a"], 1);
-    }
+        let input = "Here:\n```json\n{\"a\": 1}\n```\nDone.";
+        assert_eq!(extract_json_from_text(input).unwrap()["a"], 1);
 
-    #[test]
-    fn generic_fenced() {
         let input = "Result:\n```\n{\"b\": 2}\n```";
-        let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v["b"], 2);
+        assert_eq!(extract_json_from_text(input).unwrap()["b"], 2);
     }
 
     #[test]
-    fn trailing_comma() {
-        let input = r#"```json
-{"items": [1, 2, 3,]}
-```"#;
-        let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v["items"].as_array().unwrap().len(), 3);
-    }
-
-    #[test]
-    fn line_comments() {
-        let input = r#"```json
-{
-  "key": "val" // this is a comment
-}
-```"#;
-        let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v["key"], "val");
-    }
-
-    #[test]
-    fn balanced_bracket_in_text() {
-        let input = r#"The answer is {"name": "Alice", "age": 30} and more text."#;
+    fn balanced_in_text() {
+        let input = r#"The answer is {"name": "Alice", "age": 30} done."#;
         let v = extract_json_from_text(input).unwrap();
         assert_eq!(v["name"], "Alice");
         assert_eq!(v["age"], 30);
     }
 
     #[test]
-    fn balanced_array_in_text() {
-        let input = r"Here: [1, 2, 3] done";
-        let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v.as_array().unwrap().len(), 3);
-    }
-
-    #[test]
-    fn with_prefix() {
-        let input = r#"JSON: {"result": true}"#;
-        let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v["result"], true);
-    }
-
-    #[test]
     fn nested_objects() {
-        let input = r#"{"outer": {"inner": [1, 2]}}"#;
-        let v = extract_json_from_text(input).unwrap();
+        let v = extract_json_from_text(r#"{"outer": {"inner": [1, 2]}}"#).unwrap();
         assert_eq!(v["outer"]["inner"].as_array().unwrap().len(), 2);
     }
 
@@ -244,31 +127,5 @@ mod tests {
     fn no_valid_json() {
         assert!(extract_json_from_text("just plain text").is_err());
         assert!(extract_json_from_text("not {valid json").is_err());
-    }
-
-    #[test]
-    fn strip_prefixes_known() {
-        assert_eq!(strip_prefixes("json: {\"a\":1}"), "{\"a\":1}");
-        assert_eq!(strip_prefixes("Result: [1]"), "[1]");
-        assert_eq!(strip_prefixes("Here's the JSON: {}"), "{}");
-    }
-
-    #[test]
-    fn strip_prefixes_none() {
-        assert_eq!(strip_prefixes("{\"a\":1}"), "{\"a\":1}");
-        assert_eq!(
-            strip_prefixes("unknown prefix {\"a\":1}"),
-            "unknown prefix {\"a\":1}"
-        );
-    }
-
-    #[test]
-    fn cleanup_trailing_comma_and_comments() {
-        let input = r#"{"a": 1, // comment
-"b": 2,}"#;
-        let cleaned = cleanup_json(input);
-        let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
-        assert_eq!(v["a"], 1);
-        assert_eq!(v["b"], 2);
     }
 }

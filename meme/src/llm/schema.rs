@@ -204,6 +204,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let val: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    #[allow(clippy::cast_possible_truncation)]
     Ok(val.and_then(|v| {
         v.as_u64()
             .map(|n| n as usize)

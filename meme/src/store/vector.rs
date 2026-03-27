@@ -404,7 +404,7 @@ impl VectorStore {
         self.collect_entries(q.execute().await?).await
     }
 
-    /// Retrieve all entries together with their embedding vectors, filtered by scope.
+    /// Retrieve all entries together with their embedding vectors, filtered by namespace.
     ///
     /// # Errors
     ///

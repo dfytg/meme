@@ -69,13 +69,25 @@ meme delete <uuid>
 # View change history
 meme history <uuid>
 
-# List stored memories
+# List / count / clear
 meme list
 meme list --json --limit 50
+meme count
+meme clear
+
+# Consolidate memories (decay, merge, prune)
+meme consolidate
+
+# Show effective configuration
+meme config
 
 # Export / import
 meme export -o memories.json
 meme import memories.json
+
+# Namespace isolation (global flag, works with any command)
+meme -n alice add -s Alice "I prefer coffee."
+meme -n alice search "coffee"
 ```
 
 ### Library
@@ -173,10 +185,11 @@ max_retries = 3
 [embedding]
 provider = "api"                        # "api" or "onnx"
 model = "text-embedding-3-small"        # API model name or fastembed model code
-dimension = 1024                        # vector dimension (auto-detected for onnx)
+dimension = 1536                        # vector dimension (auto-detected for onnx)
 
 [store]
 lancedb_path = "~/.meme/lancedb"
+history_db_path = "~/.meme/history.db"
 table_name = "memories"
 
 [pipeline]
@@ -190,7 +203,6 @@ enable_reflection = true                # iterative completeness checking
 max_reflection_rounds = 2
 max_build_workers = 16                  # parallel extraction workers
 max_retrieval_workers = 8               # parallel search workers
-enable_rerank = false                   # LLM-based reranking
 # custom_extraction_prompt = "..."      # override built-in extraction prompt
 # custom_answer_prompt = "..."          # override built-in answer prompt
 ```
@@ -237,7 +249,7 @@ Each `Memory` is a self-contained, unambiguous unit of knowledge stored with thr
 
 | Index Layer | Type | Purpose | Implementation |
 | --- | --- | --- | --- |
-| **Semantic** | Dense vector | Conceptual similarity | 1024-d embeddings via OpenAI or local ONNX |
+| **Semantic** | Dense vector | Conceptual similarity | 1536-d embeddings via OpenAI or local ONNX |
 | **Lexical** | Inverted index | Exact term matching | FTS (Tantivy) + BM25-style keywords |
 | **Symbolic** | Structured metadata | Filtered lookup | Timestamp, location, persons, entities, topic |
 

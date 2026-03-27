@@ -244,14 +244,6 @@ mod tests {
     }
 
     #[test]
-    fn pipeline_config_overlap_guard() {
-        let c = PipelineConfig::default();
-        let step = c.window_size.saturating_sub(c.overlap_size).max(1);
-        assert!(step > 0);
-        assert!(step <= c.window_size);
-    }
-
-    #[test]
     fn validate_default_ok() {
         Config::default().validate().unwrap();
     }

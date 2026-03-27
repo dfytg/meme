@@ -80,8 +80,6 @@
 //! | `pipeline` | pub(crate) | Extractor, reconciler, hybrid retriever, answer generator |
 
 #![allow(clippy::missing_fields_in_debug)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_possible_truncation)]
 
 mod builder;
 pub mod config;

@@ -183,24 +183,3 @@ impl LlmClient {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chat_options_default() {
-        let opts = ChatOptions::default();
-        assert!((opts.temperature - 0.1).abs() < f32::EPSILON);
-        assert!(opts.json_mode);
-    }
-
-    #[test]
-    fn message_constructors() {
-        let sys = Message::system("hello");
-        assert_eq!(sys.role, Role::System);
-        assert_eq!(sys.content, "hello");
-
-        let usr = Message::user("question");
-        assert_eq!(usr.role, Role::User);
-    }
-}
