@@ -63,9 +63,6 @@ impl HistoryStore {
     ///
     /// Returns an error if the insert fails.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     pub async fn record(
         &self,
         memory_id: Uuid,
@@ -87,7 +84,7 @@ impl HistoryStore {
         let e = event.clone();
         let ns = namespace.map(String::from);
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let conn = conn.lock().expect("history db lock poisoned");
+            let conn = conn.lock().map_err(|e| Error::Internal(format!("mutex poisoned: {e}")))?;
             conn.execute(
                 "INSERT INTO events (event_id, memory_id, event_type, old_content, new_content, namespace, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -115,9 +112,6 @@ impl HistoryStore {
     ///
     /// Returns an error if the query fails.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     pub async fn get_history(
         &self,
         memory_id: Uuid,
@@ -127,7 +121,9 @@ impl HistoryStore {
         let mid = memory_id.to_string();
         let ns = namespace.map(String::from);
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().expect("history db lock poisoned");
+            let conn = conn
+                .lock()
+                .map_err(|e| Error::Internal(format!("mutex poisoned: {e}")))?;
             let mut stmt = conn.prepare(
                 "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
                  FROM events
@@ -168,7 +164,7 @@ impl RawEvent {
         Event {
             id: Uuid::parse_str(&self.event_id).unwrap_or_else(|_| Uuid::new_v4()),
             memory_id: Uuid::parse_str(&self.memory_id).unwrap_or_else(|_| Uuid::new_v4()),
-            event_type: EventType::from_db_str(&self.event_type),
+            event_type: self.event_type.parse().unwrap_or(EventType::Add),
             old_content: self.old_content,
             new_content: self.new_content,
             timestamp: chrono::DateTime::parse_from_rfc3339(&self.created_at)

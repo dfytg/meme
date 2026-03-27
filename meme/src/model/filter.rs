@@ -32,45 +32,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_default() {
-        let f = MetadataFilter::default();
-        assert!(f.is_empty());
-    }
+    fn is_empty_checks_all_fields() {
+        assert!(MetadataFilter::default().is_empty());
 
-    #[test]
-    fn not_empty_with_persons() {
-        let f = MetadataFilter {
-            persons: Some(vec!["Alice".into()]),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
-    }
-
-    #[test]
-    fn not_empty_with_location() {
-        let f = MetadataFilter {
-            location: Some("Tokyo".into()),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
-    }
-
-    #[test]
-    fn not_empty_with_entities() {
-        let f = MetadataFilter {
-            entities: Some(vec!["OpenAI".into()]),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
-    }
-
-    #[test]
-    fn not_empty_with_timestamp() {
         let now = Utc::now();
-        let f = MetadataFilter {
-            timestamp_range: Some((now, now)),
-            ..Default::default()
-        };
-        assert!(!f.is_empty());
+        let cases: Vec<MetadataFilter> = vec![
+            MetadataFilter {
+                persons: Some(vec!["Alice".into()]),
+                ..Default::default()
+            },
+            MetadataFilter {
+                location: Some("Tokyo".into()),
+                ..Default::default()
+            },
+            MetadataFilter {
+                entities: Some(vec!["OpenAI".into()]),
+                ..Default::default()
+            },
+            MetadataFilter {
+                timestamp_range: Some((now, now)),
+                ..Default::default()
+            },
+        ];
+        for f in &cases {
+            assert!(!f.is_empty(), "expected non-empty for {f:?}");
+        }
     }
 }

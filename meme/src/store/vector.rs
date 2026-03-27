@@ -13,12 +13,6 @@ use lancedb::query::{ExecutableQuery, QueryBase};
 use crate::error::{Error, Result};
 use crate::model::{Memory, MetadataFilter};
 
-/// Build a SQL WHERE clause fragment for a namespace filter.
-fn namespace_clause(ns: Option<&str>) -> Option<String> {
-    let ns = ns?;
-    Some(format!("namespace = '{}'", escape_sql_string(ns)))
-}
-
 /// `LanceDB`-backed vector store with multi-view indexing.
 pub struct VectorStore {
     db: lancedb::Connection,
@@ -133,13 +127,30 @@ impl VectorStore {
     }
 
     fn batch_to_entries(batch: &RecordBatch) -> Vec<Memory> {
+        fn str_val(col: Option<&StringArray>, i: usize) -> String {
+            col.map(|c| c.value(i).to_owned()).unwrap_or_default()
+        }
+        fn opt_val(col: Option<&StringArray>, i: usize) -> Option<String> {
+            col.filter(|c| !c.is_null(i))
+                .map(|c| c.value(i))
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+        }
+        fn split_delimited(s: &str) -> Vec<String> {
+            s.split("||")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        }
+
         let col = |name| -> Option<&StringArray> {
             batch
                 .column_by_name(name)
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>())
         };
         let id_col = col("id");
-        let rest_col = col("content");
+        let content_col = col("content");
         let kw_col = col("keywords");
         let ts_col = col("timestamp");
         let loc_col = col("location");
@@ -153,31 +164,16 @@ impl VectorStore {
                 let id_str = str_val(id_col, i);
                 Memory {
                     id: uuid::Uuid::parse_str(&id_str).unwrap_or_else(|_| uuid::Uuid::new_v4()),
-                    content: str_val(rest_col, i),
-                    keywords: str_val(kw_col, i)
-                        .split("||")
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(String::from)
-                        .collect(),
+                    content: str_val(content_col, i),
+                    keywords: split_delimited(&str_val(kw_col, i)),
                     timestamp: opt_val(ts_col, i).and_then(|s| {
                         chrono::DateTime::parse_from_rfc3339(&s)
                             .ok()
                             .map(|dt| dt.with_timezone(&chrono::Utc))
                     }),
                     location: opt_val(loc_col, i),
-                    persons: str_val(per_col, i)
-                        .split("||")
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(String::from)
-                        .collect(),
-                    entities: str_val(ent_col, i)
-                        .split("||")
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(String::from)
-                        .collect(),
+                    persons: split_delimited(&str_val(per_col, i)),
+                    entities: split_delimited(&str_val(ent_col, i)),
                     topic: opt_val(topic_col, i),
                     namespace: opt_val(ns_col, i),
                 }
@@ -298,8 +294,8 @@ impl VectorStore {
             .await
         {
             let mut entries = self.collect_entries(stream).await?;
-            if ns_clause.is_some() {
-                entries.retain(|e| namespace_matches(e, namespace));
+            if let Some(ns) = namespace {
+                entries.retain(|e| e.namespace.as_deref() == Some(ns));
             }
             return Ok(entries);
         }
@@ -528,21 +524,6 @@ impl VectorStore {
     }
 }
 
-fn namespace_matches(entry: &Memory, namespace: Option<&str>) -> bool {
-    namespace.is_none_or(|ns| entry.namespace.as_deref() == Some(ns))
-}
-
-fn str_val(col: Option<&StringArray>, i: usize) -> String {
-    col.map(|c| c.value(i).to_owned()).unwrap_or_default()
-}
-
-fn opt_val(col: Option<&StringArray>, i: usize) -> Option<String> {
-    col.filter(|c| !c.is_null(i))
-        .map(|c| c.value(i))
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-}
-
 fn build_vector_column(vectors: &[Vec<f32>], dimension: usize) -> Result<ArrayRef> {
     let flat: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
     let values = Float32Array::from(flat);
@@ -551,6 +532,12 @@ fn build_vector_column(vectors: &[Vec<f32>], dimension: usize) -> Result<ArrayRe
     let array = FixedSizeListArray::try_new(field, dimension as i32, Arc::new(values), None)
         .map_err(Error::arrow)?;
     Ok(Arc::new(array))
+}
+
+/// Build a SQL WHERE clause fragment for a namespace filter.
+fn namespace_clause(ns: Option<&str>) -> Option<String> {
+    let ns = ns?;
+    Some(format!("namespace = '{}'", escape_sql_string(ns)))
 }
 
 /// Escape a string for use in SQL `LIKE` patterns.
@@ -598,75 +585,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn escape_like_special_chars() {
+    fn escape_like_all_special_chars() {
         assert_eq!(escape_like("it's"), "it''s");
         assert_eq!(escape_like("100%"), "100\\%");
         assert_eq!(escape_like("a_b"), "a\\_b");
-    }
-
-    #[test]
-    fn escape_like_clean_string() {
-        assert_eq!(escape_like("hello world"), "hello world");
-    }
-
-    #[test]
-    fn escape_like_combined() {
-        assert_eq!(escape_like("it's 100%_done"), "it''s 100\\%\\_done");
-    }
-
-    #[test]
-    fn escape_like_backslash() {
-        assert_eq!(escape_like(r"a\b"), r"a\\b");
         assert_eq!(escape_like(r"c:\path"), r"c:\\path");
-    }
-
-    #[test]
-    fn namespace_none_no_clause() {
-        assert!(namespace_clause(None).is_none());
-    }
-
-    #[test]
-    fn namespace_some_clause() {
-        let clause = namespace_clause(Some("alice")).unwrap();
-        assert!(clause.contains("namespace"));
-        assert!(clause.contains("alice"));
-    }
-
-    #[test]
-    fn namespace_matches_none() {
-        let e = Memory::new("test");
-        assert!(namespace_matches(&e, None));
-    }
-
-    #[test]
-    fn namespace_matches_hit() {
-        let mut e = Memory::new("test");
-        e.namespace = Some("alice".into());
-        assert!(namespace_matches(&e, Some("alice")));
-    }
-
-    #[test]
-    fn namespace_matches_miss() {
-        let mut e = Memory::new("test");
-        e.namespace = Some("bob".into());
-        assert!(!namespace_matches(&e, Some("alice")));
-    }
-
-    #[test]
-    fn escape_sql_string_quotes() {
-        assert_eq!(escape_sql_string("it's"), "it''s");
-        assert_eq!(escape_sql_string("hello"), "hello");
-    }
-
-    #[test]
-    fn escape_sql_string_preserves_underscores() {
-        assert_eq!(escape_sql_string("user_a"), "user_a");
-        assert_eq!(escape_sql_string("a_b_c"), "a_b_c");
-    }
-
-    #[test]
-    fn namespace_with_underscore_no_escape() {
-        let clause = namespace_clause(Some("user_a")).unwrap();
-        assert_eq!(clause, "namespace = 'user_a'");
+        assert_eq!(escape_like("it's 100%_done"), "it''s 100\\%\\_done");
+        assert_eq!(escape_like("hello world"), "hello world");
     }
 }

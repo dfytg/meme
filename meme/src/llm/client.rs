@@ -182,4 +182,3 @@ impl LlmClient {
             .ok_or_else(|| Error::llm("missing content in API response"))
     }
 }
-

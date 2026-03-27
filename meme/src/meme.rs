@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::llm::{self, LlmClient, ReExtractResponse};
 use crate::model::{Dialogue, Event, EventType, Memory};
 use crate::pipeline::{self, Extractor, HybridRetriever};
-use crate::store::{ConsolidationStats, HistoryStore, VectorStore};
+use crate::store::{self, ConsolidationStats, HistoryStore, VectorStore};
 
 /// The main entry point for the meme memory system.
 ///
@@ -251,8 +251,7 @@ impl Meme {
     pub async fn ask(&self, question: &str) -> Result<String> {
         let contexts = self.retriever.retrieve(question).await?;
         let answer =
-            pipeline::generator::generate(&self.llm, question, &contexts, &self.config.pipeline)
-                .await?;
+            pipeline::generate(&self.llm, question, &contexts, &self.config.pipeline).await?;
         tracing::info!(contexts = contexts.len(), "answer generated");
         Ok(answer)
     }
@@ -296,15 +295,15 @@ impl Meme {
         merge_threshold: f64,
         min_importance: f64,
     ) -> Result<ConsolidationStats> {
-        self.store
-            .consolidate(
-                max_age_days,
-                decay_factor,
-                merge_threshold,
-                min_importance,
-                self.ns(),
-            )
-            .await
+        store::consolidate(
+            &self.store,
+            max_age_days,
+            decay_factor,
+            merge_threshold,
+            min_importance,
+            self.ns(),
+        )
+        .await
     }
 
     /// Get a reference to the configuration.
@@ -359,8 +358,7 @@ impl Meme {
         }
 
         let (to_add, vecs_add, deletes) =
-            pipeline::reconciler::reconcile(&self.llm, &self.store, self.ns(), &scoped, &vectors)
-                .await?;
+            pipeline::reconcile(&self.llm, &self.store, self.ns(), &scoped, &vectors).await?;
 
         if !deletes.is_empty() {
             for (uid, old_content) in &deletes {

@@ -26,14 +26,17 @@ impl EventType {
             Self::Delete => "delete",
         }
     }
+}
 
-    /// Parse from a database string, defaulting to [`EventType::Add`] for unknown values.
-    #[must_use]
-    pub fn from_db_str(s: &str) -> Self {
+impl std::str::FromStr for EventType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "update" => Self::Update,
-            "delete" => Self::Delete,
-            _ => Self::Add,
+            "add" => Ok(Self::Add),
+            "update" => Ok(Self::Update),
+            "delete" => Ok(Self::Delete),
+            other => Err(format!("unknown event type: {other}")),
         }
     }
 }

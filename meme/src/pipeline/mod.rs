@@ -1,9 +1,11 @@
 //! Three-stage memory pipeline: compression, reconciliation, and retrieval.
 
 mod extractor;
-pub mod generator;
-pub mod reconciler;
+mod generator;
+mod reconciler;
 mod retriever;
 
 pub use extractor::Extractor;
+pub use generator::generate;
+pub use reconciler::reconcile;
 pub use retriever::HybridRetriever;

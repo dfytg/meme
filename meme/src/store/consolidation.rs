@@ -21,120 +21,119 @@ pub struct ConsolidationStats {
     pub duration_secs: f64,
 }
 
-impl VectorStore {
-    /// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
-    ///
-    /// Operates within the given `scope` to respect multi-tenant isolation.
-    /// Uses ANN search per entry to find near-duplicates (O(n·k) instead of O(n²)).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if reading or deleting entries fails.
-    pub async fn consolidate(
-        &self,
-        max_age_days: u32,
-        decay_factor: f64,
-        merge_threshold: f64,
-        min_importance: f64,
-        namespace: Option<&str>,
-    ) -> Result<ConsolidationStats> {
-        let pairs = self.get_all_with_vectors(namespace).await?;
-        if pairs.is_empty() {
-            return Ok(ConsolidationStats::default());
-        }
+/// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
+///
+/// Operates within the given namespace to respect multi-tenant isolation.
+/// Uses ANN search per entry to find near-duplicates (O(n·k) instead of O(n²)).
+///
+/// # Errors
+///
+/// Returns an error if reading or deleting entries fails.
+pub async fn consolidate(
+    store: &VectorStore,
+    max_age_days: u32,
+    decay_factor: f64,
+    merge_threshold: f64,
+    min_importance: f64,
+    namespace: Option<&str>,
+) -> Result<ConsolidationStats> {
+    let pairs = store.get_all_with_vectors(namespace).await?;
+    if pairs.is_empty() {
+        return Ok(ConsolidationStats::default());
+    }
 
-        let t0 = std::time::Instant::now();
-        let (entries, vectors): (Vec<Memory>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
-        let n = entries.len();
+    let t0 = std::time::Instant::now();
+    let (entries, vectors): (Vec<Memory>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
+    let n = entries.len();
 
-        let now = chrono::Utc::now();
-        let max_age_secs = f64::from(max_age_days) * 86400.0;
-        let mut importance: Vec<f64> = vec![1.0; n];
-        let mut dead = HashSet::new();
+    let now = chrono::Utc::now();
+    let max_age_secs = f64::from(max_age_days) * 86400.0;
+    let mut importance: Vec<f64> = vec![1.0; n];
+    let mut dead = HashSet::new();
 
-        let mut decayed = 0usize;
-        for (i, entry) in entries.iter().enumerate() {
-            let Some(ts) = entry.timestamp else { continue };
-            let age = (now - ts).num_seconds() as f64;
-            if age > max_age_secs {
-                importance[i] *= decay_factor;
-                if importance[i] < min_importance {
-                    dead.insert(i);
-                }
-                decayed += 1;
+    let mut decayed = 0usize;
+    for (i, entry) in entries.iter().enumerate() {
+        let Some(ts) = entry.timestamp else { continue };
+        let age = (now - ts).num_seconds() as f64;
+        if age > max_age_secs {
+            importance[i] *= decay_factor;
+            if importance[i] < min_importance {
+                dead.insert(i);
             }
+            decayed += 1;
         }
+    }
 
-        let merge_k = 5;
-        let mut merged = 0usize;
-        let mut ids_to_delete: Vec<uuid::Uuid> = Vec::new();
+    let merge_k = 5;
+    let mut merged = 0usize;
+    let mut ids_to_delete: Vec<uuid::Uuid> = Vec::new();
 
-        let id_to_idx: HashMap<uuid::Uuid, usize> =
-            entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+    let id_to_idx: HashMap<uuid::Uuid, usize> =
+        entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
 
-        let live_indices: Vec<usize> = (0..n).filter(|i| !dead.contains(i)).collect();
-        let max_ann_workers = 8;
-        let semaphore = tokio::sync::Semaphore::new(max_ann_workers);
-        let vectors_ref = &vectors;
-        let ann_futures = live_indices.iter().map(|&i| {
-            let sem = &semaphore;
-            async move {
-                let _permit = sem.acquire().await;
-                self.semantic_search(&vectors_ref[i], merge_k, namespace)
-                    .await
-                    .map(|neighbors| (i, neighbors))
-            }
-        });
-        let all_neighbors: Vec<(usize, Vec<Memory>)> =
-            futures::future::try_join_all(ann_futures).await?;
+    let live_indices: Vec<usize> = (0..n).filter(|i| !dead.contains(i)).collect();
+    let max_ann_workers = 8;
+    let semaphore = tokio::sync::Semaphore::new(max_ann_workers);
+    let vectors_ref = &vectors;
+    let ann_futures = live_indices.iter().map(|&i| {
+        let sem = &semaphore;
+        async move {
+            let _permit = sem.acquire().await;
+            store
+                .semantic_search(&vectors_ref[i], merge_k, namespace)
+                .await
+                .map(|neighbors| (i, neighbors))
+        }
+    });
+    let all_neighbors: Vec<(usize, Vec<Memory>)> =
+        futures::future::try_join_all(ann_futures).await?;
 
-        for (i, neighbors) in all_neighbors {
-            if dead.contains(&i) {
+    for (i, neighbors) in all_neighbors {
+        if dead.contains(&i) {
+            continue;
+        }
+        for neighbor in &neighbors {
+            if neighbor.id == entries[i].id {
                 continue;
             }
-            for neighbor in &neighbors {
-                if neighbor.id == entries[i].id {
-                    continue;
-                }
-                let Some(&j) = id_to_idx.get(&neighbor.id) else {
-                    continue;
-                };
-                if dead.contains(&j) {
-                    continue;
-                }
-                let sim = cosine_similarity(&vectors[i], &vectors[j]);
-                if sim >= merge_threshold {
-                    let loser = if importance[i] >= importance[j] { j } else { i };
-                    if dead.insert(loser) {
-                        ids_to_delete.push(entries[loser].id);
-                        merged += 1;
-                    }
+            let Some(&j) = id_to_idx.get(&neighbor.id) else {
+                continue;
+            };
+            if dead.contains(&j) {
+                continue;
+            }
+            let sim = cosine_similarity(&vectors[i], &vectors[j]);
+            if sim >= merge_threshold {
+                let loser = if importance[i] >= importance[j] { j } else { i };
+                if dead.insert(loser) {
+                    ids_to_delete.push(entries[loser].id);
+                    merged += 1;
                 }
             }
         }
-
-        let mut pruned = 0usize;
-        for (i, entry) in entries.iter().enumerate() {
-            if !dead.contains(&i) && importance[i] < min_importance {
-                ids_to_delete.push(entry.id);
-                pruned += 1;
-            }
-        }
-
-        if !ids_to_delete.is_empty() {
-            self.delete_entries(&ids_to_delete).await?;
-        }
-
-        let stats = ConsolidationStats {
-            scanned: n,
-            decayed,
-            merged,
-            pruned,
-            duration_secs: t0.elapsed().as_secs_f64(),
-        };
-        tracing::info!(?stats, "consolidation complete");
-        Ok(stats)
     }
+
+    let mut pruned = 0usize;
+    for (i, entry) in entries.iter().enumerate() {
+        if !dead.contains(&i) && importance[i] < min_importance {
+            ids_to_delete.push(entry.id);
+            pruned += 1;
+        }
+    }
+
+    if !ids_to_delete.is_empty() {
+        store.delete_entries(&ids_to_delete).await?;
+    }
+
+    let stats = ConsolidationStats {
+        scanned: n,
+        decayed,
+        merged,
+        pruned,
+        duration_secs: t0.elapsed().as_secs_f64(),
+    };
+    tracing::info!(?stats, "consolidation complete");
+    Ok(stats)
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
