@@ -88,6 +88,20 @@ pub fn apply_env_overrides(config: &mut Config) {
     if let Ok(v) = std::env::var("MEME_EMBEDDING_PROVIDER") {
         config.embedding.provider = v.parse().unwrap_or(config.embedding.provider);
     }
+    if let Ok(v) = std::env::var("MEME_EMBEDDING_MODEL") {
+        config.embedding.model = v;
+    }
+    if let Ok(v) = std::env::var("MEME_EMBEDDING_API_KEY") {
+        config.embedding.api_key = Some(v);
+    }
+    if let Ok(v) = std::env::var("MEME_EMBEDDING_BASE_URL") {
+        config.embedding.base_url = Some(v);
+    }
+    if let Ok(v) = std::env::var("MEME_EMBEDDING_DIMENSION")
+        && let Ok(dim) = v.parse()
+    {
+        config.embedding.dimension = dim;
+    }
 }
 
 /// Resolve relative store paths to absolute paths under `~/.meme/`.

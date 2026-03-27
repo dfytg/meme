@@ -113,6 +113,12 @@ pub struct EmbeddingConfig {
     pub model: String,
     /// Embedding dimension (used by API provider; auto-detected for ONNX).
     pub dimension: usize,
+    /// API key for the embedding provider. Falls back to `llm.api_key` when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Base URL for the embedding API. Falls back to `llm.base_url` when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 impl Default for EmbeddingConfig {
@@ -121,6 +127,8 @@ impl Default for EmbeddingConfig {
             provider: EmbeddingProviderKind::Api,
             model: "text-embedding-3-small".to_owned(),
             dimension: 1536,
+            api_key: None,
+            base_url: None,
         }
     }
 }

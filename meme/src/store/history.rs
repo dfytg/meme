@@ -141,7 +141,7 @@ impl HistoryStore {
                     created_at: row.get(5)?,
                 })
             })?;
-            rows.map(|r| Ok(r?.into_event()))
+            rows.map(|r| r?.try_into_event())
                 .collect::<Result<Vec<_>>>()
         })
         .await
@@ -160,15 +160,24 @@ struct RawEvent {
 }
 
 impl RawEvent {
-    fn into_event(self) -> Event {
-        Event {
-            id: Uuid::parse_str(&self.event_id).unwrap_or_else(|_| Uuid::new_v4()),
-            memory_id: Uuid::parse_str(&self.memory_id).unwrap_or_else(|_| Uuid::new_v4()),
-            event_type: self.event_type.parse().unwrap_or(EventType::Add),
+    fn try_into_event(self) -> Result<Event> {
+        Ok(Event {
+            id: Uuid::parse_str(&self.event_id).map_err(|e| {
+                Error::History(format!("corrupt event_id '{}': {e}", self.event_id))
+            })?,
+            memory_id: Uuid::parse_str(&self.memory_id).map_err(|e| {
+                Error::History(format!("corrupt memory_id '{}': {e}", self.memory_id))
+            })?,
+            event_type: self.event_type.parse().map_err(|e| {
+                Error::History(format!("corrupt event_type '{}': {e}", self.event_type))
+            })?,
             old_content: self.old_content,
             new_content: self.new_content,
             timestamp: chrono::DateTime::parse_from_rfc3339(&self.created_at)
-                .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
-        }
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|e| {
+                    Error::History(format!("corrupt created_at '{}': {e}", self.created_at))
+                })?,
+        })
     }
 }

@@ -88,6 +88,13 @@ impl MemeBuilder {
         self
     }
 
+    /// Set the embedding provider (`Api` or `Onnx`).
+    #[must_use]
+    pub const fn embedding_provider(mut self, provider: config::EmbeddingProviderKind) -> Self {
+        self.config.embedding.provider = provider;
+        self
+    }
+
     /// Set the embedding model name.
     #[must_use]
     pub fn embedding_model(mut self, model: impl Into<String>) -> Self {
@@ -99,6 +106,20 @@ impl MemeBuilder {
     #[must_use]
     pub const fn embedding_dimension(mut self, dim: usize) -> Self {
         self.config.embedding.dimension = dim;
+        self
+    }
+
+    /// Set the embedding API key (when using a different provider than LLM).
+    #[must_use]
+    pub fn embedding_api_key(mut self, key: impl Into<String>) -> Self {
+        self.config.embedding.api_key = Some(key.into());
+        self
+    }
+
+    /// Set the embedding API base URL (when using a different provider than LLM).
+    #[must_use]
+    pub fn embedding_base_url(mut self, url: impl Into<String>) -> Self {
+        self.config.embedding.base_url = Some(url.into());
         self
     }
 

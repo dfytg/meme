@@ -174,6 +174,10 @@ The CLI tool (`meme-cli`) optionally reads `~/.meme/config.toml`. Environment va
 | `MEME_LLM_BASE_URL` | `llm.base_url` | `https://api.openai.com/v1` |
 | `MEME_LLM_MODEL` | `llm.model` | `gpt-4.1-mini` |
 | `MEME_EMBEDDING_PROVIDER` | `embedding.provider` | `api` |
+| `MEME_EMBEDDING_MODEL` | `embedding.model` | `text-embedding-3-small` |
+| `MEME_EMBEDDING_API_KEY` | `embedding.api_key` | *(falls back to LLM key)* |
+| `MEME_EMBEDDING_BASE_URL` | `embedding.base_url` | *(falls back to LLM URL)* |
+| `MEME_EMBEDDING_DIMENSION` | `embedding.dimension` | `1536` |
 
 <details>
 <summary><b>Full config.toml reference</b></summary>
@@ -190,6 +194,8 @@ max_retries = 3
 provider = "api"                        # "api" or "onnx"
 model = "text-embedding-3-small"        # API model name or fastembed model code
 dimension = 1536                        # vector dimension (auto-detected for onnx)
+# api_key = "sk-embed-..."             # optional: separate key for embedding API
+# base_url = "https://api.cohere.com/v1" # optional: separate endpoint for embedding API
 
 [store]
 lancedb_path = ".meme/lancedb"           # CLI resolves to ~/.meme/lancedb

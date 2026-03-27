@@ -31,13 +31,21 @@ impl ApiEmbedding {
         embedding_cfg: &crate::config::EmbeddingConfig,
         llm_cfg: &crate::config::LlmConfig,
     ) -> Result<Self> {
-        let api_key = llm_cfg
+        let api_key = embedding_cfg
             .api_key
-            .clone()
-            .ok_or_else(|| Error::Config("API key is required for API embedding".to_owned()))?;
+            .as_deref()
+            .or(llm_cfg.api_key.as_deref())
+            .ok_or_else(|| Error::Config("API key is required for API embedding".to_owned()))?
+            .to_owned();
+        let base_url = embedding_cfg
+            .base_url
+            .as_deref()
+            .unwrap_or(&llm_cfg.base_url)
+            .trim_end_matches('/')
+            .to_owned();
         Ok(Self {
             http,
-            base_url: llm_cfg.base_url.trim_end_matches('/').to_owned(),
+            base_url,
             api_key,
             model: embedding_cfg.model.clone(),
             dimension: embedding_cfg.dimension,
