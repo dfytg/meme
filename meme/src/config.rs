@@ -32,20 +32,32 @@ impl Config {
     ///
     /// Returns an error if any configuration value is invalid.
     pub fn validate(&self) -> Result<()> {
+        if self.pipeline.window_size == 0 {
+            return Err(Error::Config("window_size must be > 0".into()));
+        }
         if self.pipeline.overlap_size >= self.pipeline.window_size {
             return Err(Error::Config(format!(
                 "overlap_size ({}) must be less than window_size ({})",
                 self.pipeline.overlap_size, self.pipeline.window_size
             )));
         }
-        if self.pipeline.window_size == 0 {
-            return Err(Error::Config("window_size must be > 0".into()));
-        }
         if self.embedding.dimension == 0 {
             return Err(Error::Config("embedding dimension must be > 0".into()));
         }
         if self.llm.max_retries == 0 || self.llm.max_retries > 10 {
             return Err(Error::Config("max_retries must be between 1 and 10".into()));
+        }
+        if self.pipeline.semantic_top_k == 0 {
+            return Err(Error::Config("semantic_top_k must be > 0".into()));
+        }
+        if self.pipeline.rerank_top_n == 0 {
+            return Err(Error::Config("rerank_top_n must be > 0".into()));
+        }
+        if self.pipeline.max_build_workers == 0 {
+            return Err(Error::Config("max_build_workers must be > 0".into()));
+        }
+        if self.pipeline.max_retrieval_workers == 0 {
+            return Err(Error::Config("max_retrieval_workers must be > 0".into()));
         }
         Ok(())
     }

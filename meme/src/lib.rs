@@ -65,7 +65,8 @@
 //! | [`Memory`] | A single self-contained unit of knowledge |
 //! | [`Dialogue`] | Speaker + content input for conversation ingestion |
 //! | [`Event`] / [`EventType`] | Change-history audit records |
-//! | [`ConsolidationStats`](store::ConsolidationStats) | Summary returned by [`Meme::consolidate`] |
+//! | [`ConsolidationParams`] | Parameters for [`Meme::consolidate`] |
+//! | [`ConsolidationStats`] | Summary returned by [`Meme::consolidate`] |
 //!
 //! ## Crate Layout
 //!
@@ -96,3 +97,4 @@ pub mod store;
 pub use builder::MemeBuilder;
 pub use meme::Meme;
 pub use model::{Dialogue, Event, EventType, Memory};
+pub use store::{ConsolidationParams, ConsolidationStats};
