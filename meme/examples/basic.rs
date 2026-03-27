@@ -11,7 +11,11 @@ async fn main() -> meme::error::Result<()> {
         .with_env_filter("meme=info")
         .init();
 
+    let api_key = std::env::var("MEME_LLM_API_KEY")
+        .expect("set MEME_LLM_API_KEY env var to run this example");
+
     let meme = meme::MemeBuilder::new()
+        .api_key(api_key)
         .model("gpt-4.1-mini")
         .clear_db(true)
         .build()

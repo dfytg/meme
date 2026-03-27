@@ -188,8 +188,8 @@ model = "text-embedding-3-small"        # API model name or fastembed model code
 dimension = 1536                        # vector dimension (auto-detected for onnx)
 
 [store]
-lancedb_path = "~/.meme/lancedb"
-history_db_path = "~/.meme/history.db"
+lancedb_path = ".meme/lancedb"           # CLI resolves to ~/.meme/lancedb
+history_db_path = ".meme/history.db"       # CLI resolves to ~/.meme/history.db
 table_name = "memories"
 
 [pipeline]
@@ -234,7 +234,7 @@ flowchart TB
     subgraph Read["Read Path"]
         Q[Query] --> P["LLM Planning<br/><i>Intent-Aware Retrieval</i>"]
         P --> S1[Semantic Search<br/>dense vectors]
-        P --> S2[Keyword Search<br/>FTS / Tantivy]
+        P --> S2[Keyword Search<br/>FTS / LanceDB]
         P --> S3[Structured Search<br/>metadata filters]
         S1 & S2 & S3 --> M[Merge + Deduplicate]
         M --> R{Reflection}
@@ -250,7 +250,7 @@ Each `Memory` is a self-contained, unambiguous unit of knowledge stored with thr
 | Index Layer | Type | Purpose | Implementation |
 | --- | --- | --- | --- |
 | **Semantic** | Dense vector | Conceptual similarity | 1536-d embeddings via OpenAI or local ONNX |
-| **Lexical** | Inverted index | Exact term matching | FTS (Tantivy) + BM25-style keywords |
+| **Lexical** | Inverted index | Exact term matching | LanceDB FTS + BM25-style keywords |
 | **Symbolic** | Structured metadata | Filtered lookup | Timestamp, location, persons, entities, topic |
 
 ## Pipeline

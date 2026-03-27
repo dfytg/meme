@@ -187,7 +187,11 @@ impl RunCmd {
         &self,
         scenario: &Scenario,
     ) -> anyhow::Result<(Vec<QuestionResult>, AggregateMetrics)> {
+        let api_key = std::env::var("MEME_LLM_API_KEY")
+            .map_err(|_| anyhow::anyhow!("MEME_LLM_API_KEY env var is required"))?;
+
         let meme = meme::MemeBuilder::new()
+            .api_key(api_key)
             .model(&self.model)
             .clear_db(true)
             .build()
