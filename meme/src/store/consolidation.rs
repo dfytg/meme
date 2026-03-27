@@ -6,6 +6,30 @@ use super::VectorStore;
 use crate::error::Result;
 use crate::model::Memory;
 
+/// Parameters for a consolidation run.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct ConsolidationParams {
+    /// Maximum age in days before decay applies.
+    pub max_age_days: u32,
+    /// Decay factor (0.0–1.0) applied to old entries' importance.
+    pub decay_factor: f64,
+    /// Cosine similarity threshold for merging near-duplicates.
+    pub merge_threshold: f64,
+    /// Minimum importance score to keep an entry.
+    pub min_importance: f64,
+}
+
+impl Default for ConsolidationParams {
+    fn default() -> Self {
+        Self {
+            max_age_days: 90,
+            decay_factor: 0.95,
+            merge_threshold: 0.95,
+            min_importance: 0.1,
+        }
+    }
+}
+
 /// Statistics from a consolidation run.
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct ConsolidationStats {
@@ -31,10 +55,7 @@ pub struct ConsolidationStats {
 /// Returns an error if reading or deleting entries fails.
 pub async fn consolidate(
     store: &VectorStore,
-    max_age_days: u32,
-    decay_factor: f64,
-    merge_threshold: f64,
-    min_importance: f64,
+    params: &ConsolidationParams,
     namespace: Option<&str>,
 ) -> Result<ConsolidationStats> {
     let pairs = store.get_all_with_vectors(namespace).await?;
@@ -47,7 +68,7 @@ pub async fn consolidate(
     let n = entries.len();
 
     let now = chrono::Utc::now();
-    let max_age_secs = f64::from(max_age_days) * 86400.0;
+    let max_age_secs = f64::from(params.max_age_days) * 86400.0;
     let mut importance: Vec<f64> = vec![1.0; n];
     let mut dead = HashSet::new();
 
@@ -56,8 +77,8 @@ pub async fn consolidate(
         let Some(ts) = entry.timestamp else { continue };
         let age = (now - ts).num_seconds() as f64;
         if age > max_age_secs {
-            importance[i] *= decay_factor;
-            if importance[i] < min_importance {
+            importance[i] *= params.decay_factor;
+            if importance[i] < params.min_importance {
                 dead.insert(i);
             }
             decayed += 1;
@@ -103,7 +124,7 @@ pub async fn consolidate(
                 continue;
             }
             let sim = cosine_similarity(&vectors[i], &vectors[j]);
-            if sim >= merge_threshold {
+            if sim >= params.merge_threshold {
                 let loser = if importance[i] >= importance[j] { j } else { i };
                 if dead.insert(loser) {
                     ids_to_delete.push(entries[loser].id);
@@ -115,7 +136,7 @@ pub async fn consolidate(
 
     let mut pruned = 0usize;
     for (i, entry) in entries.iter().enumerate() {
-        if !dead.contains(&i) && importance[i] < min_importance {
+        if !dead.contains(&i) && importance[i] < params.min_importance {
             ids_to_delete.push(entry.id);
             pruned += 1;
         }

@@ -291,20 +291,9 @@ impl Meme {
     /// Returns an error if reading or deleting entries fails.
     pub async fn consolidate(
         &self,
-        max_age_days: u32,
-        decay_factor: f64,
-        merge_threshold: f64,
-        min_importance: f64,
+        params: &store::ConsolidationParams,
     ) -> Result<ConsolidationStats> {
-        store::consolidate(
-            &self.store,
-            max_age_days,
-            decay_factor,
-            merge_threshold,
-            min_importance,
-            self.ns(),
-        )
-        .await
+        store::consolidate(&self.store, params, self.ns()).await
     }
 
     /// Get a reference to the configuration.

@@ -4,6 +4,6 @@ mod consolidation;
 mod history;
 mod vector;
 
-pub use consolidation::{ConsolidationStats, consolidate};
+pub use consolidation::{ConsolidationParams, ConsolidationStats, consolidate};
 pub use history::HistoryStore;
 pub use vector::VectorStore;

@@ -1,6 +1,7 @@
 //! `meme consolidate` — consolidate memories (decay, merge, prune).
 
 use clap::Args;
+use meme::store::ConsolidationParams;
 
 use super::Context;
 
@@ -30,16 +31,16 @@ impl ConsolidateCmd {
     /// # Errors
     ///
     /// Returns an error if consolidation fails.
+    #[allow(clippy::print_stdout)]
     pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let meme = ctx.build_meme().await?;
-        let stats = meme
-            .consolidate(
-                self.max_age_days,
-                self.decay_factor,
-                self.merge_threshold,
-                self.min_importance,
-            )
-            .await?;
+        let params = ConsolidationParams {
+            max_age_days: self.max_age_days,
+            decay_factor: self.decay_factor,
+            merge_threshold: self.merge_threshold,
+            min_importance: self.min_importance,
+        };
+        let stats = meme.consolidate(&params).await?;
 
         println!("Consolidation complete ({:.1}s):", stats.duration_secs);
         println!("  Scanned: {}", stats.scanned);
