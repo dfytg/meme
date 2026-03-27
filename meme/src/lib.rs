@@ -89,6 +89,8 @@ pub(crate) mod llm;
 mod meme;
 pub mod model;
 pub(crate) mod pipeline;
+#[cfg(feature = "onnx")]
+pub(crate) mod reranking;
 pub mod store;
 
 pub use builder::MemeBuilder;

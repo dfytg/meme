@@ -138,12 +138,23 @@ impl MemeBuilder {
             config.pipeline.max_build_workers,
         );
 
+        #[cfg(feature = "onnx")]
+        let reranker = config
+            .pipeline
+            .reranker_model
+            .as_deref()
+            .map(crate::reranking::OnnxReranker::new)
+            .transpose()?
+            .map(Arc::new);
+
         let retriever = HybridRetriever::new(
             Arc::clone(&llm),
             Arc::clone(&store),
             Arc::clone(&embedder),
             config.pipeline.clone(),
             self.namespace.clone(),
+            #[cfg(feature = "onnx")]
+            reranker,
         );
 
         tracing::info!("meme system initialized");

@@ -173,6 +173,14 @@ pub struct PipelineConfig {
     pub custom_extraction_prompt: Option<String>,
     /// Custom answer generation prompt (replaces the built-in answer prompt).
     pub custom_answer_prompt: Option<String>,
+    /// Reranker model name (e.g. `"BAAI/bge-reranker-v2-m3"`). Requires `onnx` feature.
+    ///
+    /// When set, retrieval results are re-scored by a cross-encoder model
+    /// before being returned, significantly improving precision.
+    /// Set to `None` to disable reranking (default).
+    pub reranker_model: Option<String>,
+    /// Number of top results to keep after reranking.
+    pub rerank_top_n: usize,
 }
 
 impl Default for PipelineConfig {
@@ -184,12 +192,14 @@ impl Default for PipelineConfig {
             keyword_top_k: 5,
             structured_top_k: 5,
             enable_planning: true,
-            enable_reflection: true,
+            enable_reflection: false,
             max_reflection_rounds: 2,
             max_build_workers: 16,
             max_retrieval_workers: 8,
             custom_extraction_prompt: None,
             custom_answer_prompt: None,
+            reranker_model: None,
+            rerank_top_n: 10,
         }
     }
 }
@@ -209,7 +219,7 @@ mod tests {
         assert_eq!(c.embedding.dimension, 1536);
         assert_eq!(c.pipeline.window_size, 40);
         assert!(c.pipeline.enable_planning);
-        assert!(c.pipeline.enable_reflection);
+        assert!(!c.pipeline.enable_reflection);
     }
 
     #[test]

@@ -24,6 +24,8 @@ pub struct HybridRetriever {
     embedder: Arc<Embedder>,
     config: PipelineConfig,
     namespace: Option<String>,
+    #[cfg(feature = "onnx")]
+    reranker: Option<Arc<crate::reranking::OnnxReranker>>,
 }
 
 impl std::fmt::Debug for HybridRetriever {
@@ -45,6 +47,7 @@ impl HybridRetriever {
         embedder: Arc<Embedder>,
         config: PipelineConfig,
         namespace: Option<String>,
+        #[cfg(feature = "onnx")] reranker: Option<Arc<crate::reranking::OnnxReranker>>,
     ) -> Self {
         Self {
             llm,
@@ -52,6 +55,8 @@ impl HybridRetriever {
             embedder,
             config,
             namespace,
+            #[cfg(feature = "onnx")]
+            reranker,
         }
     }
 
@@ -96,6 +101,8 @@ impl HybridRetriever {
         if self.config.enable_reflection {
             merged = self.reflect(query, merged, &plan).await?;
         }
+
+        merged = self.maybe_rerank(query, merged).await?;
 
         Ok(merged)
     }
@@ -298,6 +305,27 @@ impl HybridRetriever {
         };
         let resp: MissingQueriesResponse = self.llm.chat_structured(&messages, &opts).await?;
         Ok(resp.targeted_queries)
+    }
+
+    /// Apply reranker if configured, otherwise pass through unchanged.
+    #[allow(unused_variables, clippy::unused_async)]
+    async fn maybe_rerank(&self, query: &str, entries: Vec<Memory>) -> Result<Vec<Memory>> {
+        #[cfg(feature = "onnx")]
+        if let Some(reranker) = &self.reranker {
+            if entries.is_empty() {
+                return Ok(entries);
+            }
+            let docs: Vec<&str> = entries.iter().map(|e| e.content.as_str()).collect();
+            let top_n = self.config.rerank_top_n;
+            let indices = reranker.rerank(query, &docs, top_n).await?;
+            tracing::info!(
+                before = entries.len(),
+                after = indices.len(),
+                "reranked results"
+            );
+            return Ok(indices.into_iter().map(|i| entries[i].clone()).collect());
+        }
+        Ok(entries)
     }
 }
 
