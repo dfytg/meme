@@ -158,6 +158,7 @@ impl Meme {
 
         let mut updated = existing.clone();
         updated.content = new_content.to_owned();
+        updated.updated_at = Some(chrono::Utc::now());
         self.re_extract_metadata(&mut updated).await;
 
         let vecs = self.embedder.encode_documents(&[new_content]).await?;

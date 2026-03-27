@@ -78,6 +78,8 @@ impl VectorStore {
             Field::new("persons", DataType::Utf8, false),
             Field::new("entities", DataType::Utf8, false),
             Field::new("topic", DataType::Utf8, true),
+            Field::new("created_at", DataType::Utf8, false),
+            Field::new("updated_at", DataType::Utf8, true),
             Field::new("namespace", DataType::Utf8, true),
             Field::new(
                 "vector",
@@ -136,12 +138,11 @@ impl VectorStore {
                 .filter(|s| !s.is_empty())
                 .map(String::from)
         }
-        fn split_delimited(s: &str) -> Vec<String> {
-            s.split("||")
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-                .collect()
+        fn parse_json_array(s: &str) -> Vec<String> {
+            if s.is_empty() {
+                return Vec::new();
+            }
+            serde_json::from_str(s).unwrap_or_default()
         }
 
         let col = |name| -> Option<&StringArray> {
@@ -157,6 +158,8 @@ impl VectorStore {
         let per_col = col("persons");
         let ent_col = col("entities");
         let topic_col = col("topic");
+        let created_col = col("created_at");
+        let updated_col = col("updated_at");
         let ns_col = col("namespace");
 
         (0..batch.num_rows())
@@ -165,16 +168,28 @@ impl VectorStore {
                 Memory {
                     id: uuid::Uuid::parse_str(&id_str).unwrap_or_else(|_| uuid::Uuid::new_v4()),
                     content: str_val(content_col, i),
-                    keywords: split_delimited(&str_val(kw_col, i)),
+                    keywords: parse_json_array(&str_val(kw_col, i)),
                     timestamp: opt_val(ts_col, i).and_then(|s| {
                         chrono::DateTime::parse_from_rfc3339(&s)
                             .ok()
                             .map(|dt| dt.with_timezone(&chrono::Utc))
                     }),
                     location: opt_val(loc_col, i),
-                    persons: split_delimited(&str_val(per_col, i)),
-                    entities: split_delimited(&str_val(ent_col, i)),
+                    persons: parse_json_array(&str_val(per_col, i)),
+                    entities: parse_json_array(&str_val(ent_col, i)),
                     topic: opt_val(topic_col, i),
+                    created_at: opt_val(created_col, i)
+                        .and_then(|s| {
+                            chrono::DateTime::parse_from_rfc3339(&s)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&chrono::Utc))
+                        })
+                        .unwrap_or_else(chrono::Utc::now),
+                    updated_at: opt_val(updated_col, i).and_then(|s| {
+                        chrono::DateTime::parse_from_rfc3339(&s)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                    }),
                     namespace: opt_val(ns_col, i),
                 }
             })
@@ -216,12 +231,14 @@ impl VectorStore {
         let columns: Vec<ArrayRef> = vec![
             col(|e| e.id.to_string()),
             col(|e| e.content.clone()),
-            col(|e| e.keywords.join("||")),
+            col(|e| serde_json::to_string(&e.keywords).unwrap_or_default()),
             col(|e| e.timestamp.map(|ts| ts.to_rfc3339()).unwrap_or_default()),
             col(|e| e.location.clone().unwrap_or_default()),
-            col(|e| e.persons.join("||")),
-            col(|e| e.entities.join("||")),
+            col(|e| serde_json::to_string(&e.persons).unwrap_or_default()),
+            col(|e| serde_json::to_string(&e.entities).unwrap_or_default()),
             col(|e| e.topic.clone().unwrap_or_default()),
+            col(|e| e.created_at.to_rfc3339()),
+            col(|e| e.updated_at.map(|ts| ts.to_rfc3339()).unwrap_or_default()),
             col(|e| e.namespace.clone().unwrap_or_default()),
             build_vector_column(vectors, self.dimension)?,
         ];

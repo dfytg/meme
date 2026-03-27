@@ -59,6 +59,8 @@ impl ExtractedEntry {
             persons: self.persons,
             entities: self.entities,
             topic: self.topic,
+            created_at: Utc::now(),
+            updated_at: None,
             namespace: None,
         })
     }

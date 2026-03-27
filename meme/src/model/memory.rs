@@ -32,6 +32,11 @@ pub struct Memory {
     pub entities: Vec<String>,
     /// Topic phrase.
     pub topic: Option<String>,
+    /// When this memory was first stored.
+    pub created_at: DateTime<Utc>,
+    /// When this memory was last modified (`None` if never updated).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
     /// Namespace for memory isolation (opaque, caller-defined).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
@@ -70,6 +75,8 @@ impl Memory {
             persons: Vec::new(),
             entities: Vec::new(),
             topic: None,
+            created_at: Utc::now(),
+            updated_at: None,
             namespace: None,
         }
     }
