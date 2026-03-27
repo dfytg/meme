@@ -46,6 +46,7 @@ use crate::store::{HistoryStore, VectorStore};
 #[derive(Debug, Clone, Default)]
 pub struct MemeBuilder {
     config: Config,
+    http_client: Option<reqwest::Client>,
     clear_db: bool,
     namespace: Option<String>,
 }
@@ -152,6 +153,16 @@ impl MemeBuilder {
         self
     }
 
+    /// Provide a pre-configured [`reqwest::Client`].
+    ///
+    /// Use this to customize timeouts, proxies, TLS certificates, or
+    /// connection pooling. When omitted, a default client is created.
+    #[must_use]
+    pub fn http_client(mut self, client: reqwest::Client) -> Self {
+        self.http_client = Some(client);
+        self
+    }
+
     /// Clear the database on initialization.
     #[must_use]
     pub const fn clear_db(mut self, clear: bool) -> Self {
@@ -178,7 +189,7 @@ impl MemeBuilder {
         let config = self.config;
         config.validate()?;
 
-        let http = build_http_client()?;
+        let http = self.http_client.map_or_else(build_http_client, Ok)?;
         let llm = Arc::new(LlmClient::new(http.clone(), &config.llm)?);
 
         let embedder = Arc::new(match config.embedding.provider {
