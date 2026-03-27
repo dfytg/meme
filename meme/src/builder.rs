@@ -241,6 +241,13 @@ impl MemeBuilder {
             .transpose()?
             .map(Arc::new);
 
+        #[cfg(not(feature = "onnx"))]
+        if config.pipeline.reranker_model.is_some() {
+            return Err(Error::Config(
+                "reranker requires the 'onnx' feature flag".into(),
+            ));
+        }
+
         let retriever = HybridRetriever::new(
             Arc::clone(&llm),
             Arc::clone(&store),
