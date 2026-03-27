@@ -2,6 +2,8 @@
 
 use clap::Args;
 
+use super::Context;
+
 /// Update a memory entry's content by UUID.
 #[derive(Debug, Args)]
 pub struct UpdateCmd {
@@ -10,14 +12,6 @@ pub struct UpdateCmd {
 
     /// New content for the memory entry.
     pub content: String,
-
-    /// User identifier for memory isolation.
-    #[arg(long)]
-    pub user_id: Option<String>,
-
-    /// Session identifier for memory isolation.
-    #[arg(long)]
-    pub session_id: Option<String>,
 }
 
 impl UpdateCmd {
@@ -26,14 +20,10 @@ impl UpdateCmd {
     /// # Errors
     ///
     /// Returns an error if the update fails.
-    pub async fn run(&self) -> anyhow::Result<()> {
-        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
-
-        let uuid = uuid::Uuid::parse_str(&self.id)
-            .map_err(|e| anyhow::anyhow!("invalid UUID '{id}': {e}", id = self.id))?;
-
+    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+        let uuid = super::parse_uuid(&self.id)?;
+        let meme = ctx.build_meme().await?;
         meme.update(uuid, &self.content).await?;
-
         println!("Updated entry {uuid}");
         Ok(())
     }

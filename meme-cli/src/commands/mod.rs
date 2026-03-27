@@ -2,8 +2,12 @@
 
 pub mod add;
 pub mod ask;
+pub mod clear;
+pub mod config;
+pub mod consolidate;
+pub mod count;
+pub mod data;
 pub mod delete;
-pub mod export;
 pub mod get;
 pub mod history;
 pub mod init;
@@ -11,9 +15,49 @@ pub mod list;
 pub mod search;
 pub mod update;
 
+use std::path::PathBuf;
+
 use meme::{Meme, MemeBuilder};
+use uuid::Uuid;
 
 use crate::config_loader;
+
+/// Global options shared across all subcommands.
+#[derive(Debug)]
+pub struct Context {
+    /// User identifier for memory isolation.
+    pub user_id: Option<String>,
+    /// Session identifier for memory isolation.
+    pub session_id: Option<String>,
+    /// Custom config file path.
+    pub config_path: Option<PathBuf>,
+}
+
+impl Context {
+    /// Build a [`Meme`] instance using the global options.
+    ///
+    /// Loads config from `--config` path or `~/.meme/config.toml`, applies
+    /// environment variable overrides, then constructs the `Meme` instance.
+    pub async fn build_meme(&self) -> anyhow::Result<Meme> {
+        let config = match &self.config_path {
+            Some(path) => config_loader::from_file(path)?,
+            None => config_loader::load_default(),
+        };
+        let mut builder = MemeBuilder::new().config(config);
+        if let Some(uid) = &self.user_id {
+            builder = builder.user_id(uid);
+        }
+        if let Some(sid) = &self.session_id {
+            builder = builder.session_id(sid);
+        }
+        builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))
+    }
+}
+
+/// Parse a UUID string, returning a user-friendly error on failure.
+pub fn parse_uuid(s: &str) -> anyhow::Result<Uuid> {
+    Uuid::parse_str(s).map_err(|e| anyhow::anyhow!("invalid UUID '{s}': {e}"))
+}
 
 /// UTF-8 safe string truncation for display.
 pub fn truncate_str(s: &str, max_chars: usize) -> String {
@@ -23,21 +67,4 @@ pub fn truncate_str(s: &str, max_chars: usize) -> String {
         let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
         format!("{truncated}...")
     }
-}
-
-/// Build a [`Meme`] instance with optional scope parameters.
-///
-/// Loads configuration from `~/.meme/config.toml` (if present) with
-/// environment variable overrides, then constructs the `Meme` instance.
-pub async fn build_meme(user_id: Option<&str>, session_id: Option<&str>) -> anyhow::Result<Meme> {
-    let config = config_loader::load_default();
-    let mut builder = MemeBuilder::new().config(config);
-    if let Some(uid) = user_id {
-        builder = builder.user_id(uid);
-    }
-    if let Some(sid) = session_id {
-        builder = builder.session_id(sid);
-    }
-    let meme = builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))?;
-    Ok(meme)
 }

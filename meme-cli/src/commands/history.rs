@@ -3,6 +3,8 @@
 use clap::Args;
 use comfy_table::{Cell, Table};
 
+use super::Context;
+
 /// View the change history of a memory entry.
 #[derive(Debug, Args)]
 pub struct HistoryCmd {
@@ -12,14 +14,6 @@ pub struct HistoryCmd {
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
-
-    /// User identifier for memory isolation.
-    #[arg(long)]
-    pub user_id: Option<String>,
-
-    /// Session identifier for memory isolation.
-    #[arg(long)]
-    pub session_id: Option<String>,
 }
 
 impl HistoryCmd {
@@ -28,11 +22,9 @@ impl HistoryCmd {
     /// # Errors
     ///
     /// Returns an error if the query fails.
-    pub async fn run(&self) -> anyhow::Result<()> {
-        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
-
-        let uuid = uuid::Uuid::parse_str(&self.id)
-            .map_err(|e| anyhow::anyhow!("invalid UUID '{id}': {e}", id = self.id))?;
+    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+        let uuid = super::parse_uuid(&self.id)?;
+        let meme = ctx.build_meme().await?;
 
         let events = meme.history(uuid).await?;
 

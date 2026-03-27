@@ -3,6 +3,8 @@
 use clap::Args;
 use comfy_table::{Cell, Table};
 
+use super::Context;
+
 /// List stored memory entries.
 #[derive(Debug, Args)]
 pub struct ListCmd {
@@ -13,14 +15,6 @@ pub struct ListCmd {
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
-
-    /// User identifier for memory isolation.
-    #[arg(long)]
-    pub user_id: Option<String>,
-
-    /// Session identifier for memory isolation.
-    #[arg(long)]
-    pub session_id: Option<String>,
 }
 
 impl ListCmd {
@@ -29,8 +23,8 @@ impl ListCmd {
     /// # Errors
     ///
     /// Returns an error if the query fails.
-    pub async fn run(&self) -> anyhow::Result<()> {
-        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
+    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+        let meme = ctx.build_meme().await?;
 
         let entries = meme.list().await?;
 

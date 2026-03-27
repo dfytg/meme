@@ -46,13 +46,16 @@ pub fn load_default() -> Config {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "config parse failed, using defaults");
-                Config::default()
+                let mut c = Config::default();
+                apply_env_overrides(&mut c);
+                c
             }
         }
     } else {
-        Config::default()
+        let mut c = Config::default();
+        apply_env_overrides(&mut c);
+        c
     };
-    apply_env_overrides(&mut config);
     resolve_store_paths(&mut config);
     config
 }

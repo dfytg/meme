@@ -2,20 +2,14 @@
 
 use clap::Args;
 
+use super::Context;
+
 /// Export memory entries to JSON.
 #[derive(Debug, Args)]
 pub struct ExportCmd {
     /// Output file path (stdout if not specified).
     #[arg(short, long)]
     pub output: Option<String>,
-
-    /// User identifier for memory isolation.
-    #[arg(long)]
-    pub user_id: Option<String>,
-
-    /// Session identifier for memory isolation.
-    #[arg(long)]
-    pub session_id: Option<String>,
 }
 
 impl ExportCmd {
@@ -24,11 +18,9 @@ impl ExportCmd {
     /// # Errors
     ///
     /// Returns an error if the export fails.
-    pub async fn run(&self) -> anyhow::Result<()> {
-        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
-
+    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+        let meme = ctx.build_meme().await?;
         let entries = meme.list().await?;
-
         let json = serde_json::to_string_pretty(&entries)?;
 
         if let Some(path) = &self.output {
@@ -37,7 +29,6 @@ impl ExportCmd {
         } else {
             println!("{json}");
         }
-
         Ok(())
     }
 }
@@ -47,14 +38,6 @@ impl ExportCmd {
 pub struct ImportCmd {
     /// Input file path.
     pub file: String,
-
-    /// User identifier for memory isolation.
-    #[arg(long)]
-    pub user_id: Option<String>,
-
-    /// Session identifier for memory isolation.
-    #[arg(long)]
-    pub session_id: Option<String>,
 }
 
 impl ImportCmd {
@@ -63,7 +46,7 @@ impl ImportCmd {
     /// # Errors
     ///
     /// Returns an error if the import fails.
-    pub async fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(&self.file)?;
         let entries: Vec<meme::Memory> = serde_json::from_str(&content)?;
 
@@ -73,7 +56,7 @@ impl ImportCmd {
             self.file
         );
 
-        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
+        let meme = ctx.build_meme().await?;
         meme.import(&entries).await?;
 
         println!("Imported {count} entries successfully.");

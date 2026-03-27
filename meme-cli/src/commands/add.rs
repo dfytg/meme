@@ -2,6 +2,8 @@
 
 use clap::Args;
 
+use super::Context;
+
 /// Add a dialogue or raw fact to the memory system.
 ///
 /// Without `--speaker`, stores content as a direct fact via `put()`.
@@ -22,14 +24,6 @@ pub struct AddCmd {
     /// Import dialogues from a JSONL file.
     #[arg(long, value_name = "FILE")]
     pub file: Option<String>,
-
-    /// User identifier for memory isolation.
-    #[arg(long)]
-    pub user_id: Option<String>,
-
-    /// Session identifier for memory isolation.
-    #[arg(long)]
-    pub session_id: Option<String>,
 }
 
 impl AddCmd {
@@ -38,21 +32,21 @@ impl AddCmd {
     /// # Errors
     ///
     /// Returns an error if adding fails.
-    pub async fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         if let Some(file_path) = &self.file {
-            self.import_file(file_path).await
+            self.import_file(ctx, file_path).await
         } else {
-            self.add_single().await
+            self.add_single(ctx).await
         }
     }
 
-    async fn add_single(&self) -> anyhow::Result<()> {
+    async fn add_single(&self, ctx: &Context) -> anyhow::Result<()> {
         let content = self
             .content
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("content is required"))?;
 
-        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
+        let meme = ctx.build_meme().await?;
 
         if let Some(speaker) = &self.speaker {
             let timestamp = self
@@ -79,18 +73,17 @@ impl AddCmd {
         Ok(())
     }
 
-    async fn import_file(&self, path: &str) -> anyhow::Result<()> {
+    async fn import_file(&self, ctx: &Context, path: &str) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(path)?;
         let mut dialogues = Vec::new();
-        let mut line_num = 1u64;
 
-        for line in content.lines() {
+        for (line_num, line) in content.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
             let v: serde_json::Value = serde_json::from_str(line)
-                .map_err(|e| anyhow::anyhow!("invalid JSONL at line {line_num}: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("invalid JSONL at line {}: {e}", line_num + 1))?;
 
             let speaker = v["speaker"].as_str().unwrap_or("unknown").to_owned();
             let text = v["content"].as_str().unwrap_or("").to_owned();
@@ -105,11 +98,10 @@ impl AddCmd {
                 d = d.with_timestamp(ts);
             }
             dialogues.push(d);
-            line_num += 1;
         }
 
         let count = dialogues.len();
-        let meme = super::build_meme(self.user_id.as_deref(), self.session_id.as_deref()).await?;
+        let meme = ctx.build_meme().await?;
         meme.add(&dialogues).await?;
         meme.flush().await?;
 

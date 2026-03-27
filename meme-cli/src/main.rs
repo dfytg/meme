@@ -5,12 +5,26 @@
 mod commands;
 mod config_loader;
 
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 /// Long-term memory for AI agents.
 #[derive(Debug, Parser)]
 #[command(name = "meme", version, about)]
 struct Cli {
+    /// User identifier for memory isolation.
+    #[arg(long, global = true)]
+    user_id: Option<String>,
+
+    /// Session identifier for memory isolation.
+    #[arg(long, global = true)]
+    session_id: Option<String>,
+
+    /// Path to configuration file (default: ~/.meme/config.toml).
+    #[arg(long, global = true, value_name = "PATH")]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -35,10 +49,18 @@ enum Command {
     History(commands::history::HistoryCmd),
     /// List stored memory entries.
     List(commands::list::ListCmd),
+    /// Count stored memory entries.
+    Count(commands::count::CountCmd),
+    /// Clear all stored memories.
+    Clear(commands::clear::ClearCmd),
+    /// Consolidate memories (decay, merge, prune).
+    Consolidate(commands::consolidate::ConsolidateCmd),
     /// Export memory entries to JSON.
-    Export(commands::export::ExportCmd),
+    Export(commands::data::ExportCmd),
     /// Import memory entries from a JSON file.
-    Import(commands::export::ImportCmd),
+    Import(commands::data::ImportCmd),
+    /// Show effective configuration.
+    Config(commands::config::ConfigCmd),
 }
 
 fn main() {
@@ -52,24 +74,34 @@ fn main() {
     let cli = Cli::parse();
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
 
-    if let Err(e) = rt.block_on(run(cli.command)) {
+    let ctx = commands::Context {
+        user_id: cli.user_id,
+        session_id: cli.session_id,
+        config_path: cli.config,
+    };
+
+    if let Err(e) = rt.block_on(run(cli.command, &ctx)) {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }
 
-async fn run(cmd: Command) -> anyhow::Result<()> {
+async fn run(cmd: Command, ctx: &commands::Context) -> anyhow::Result<()> {
     match cmd {
-        Command::Init(c) => c.run(),
-        Command::Add(c) => c.run().await,
-        Command::Ask(c) => c.run().await,
-        Command::Search(c) => c.run().await,
-        Command::Get(c) => c.run().await,
-        Command::Update(c) => c.run().await,
-        Command::Delete(c) => c.run().await,
-        Command::History(c) => c.run().await,
-        Command::List(c) => c.run().await,
-        Command::Export(c) => c.run().await,
-        Command::Import(c) => c.run().await,
+        Command::Init(c) => c.run(ctx),
+        Command::Add(c) => c.run(ctx).await,
+        Command::Ask(c) => c.run(ctx).await,
+        Command::Search(c) => c.run(ctx).await,
+        Command::Get(c) => c.run(ctx).await,
+        Command::Update(c) => c.run(ctx).await,
+        Command::Delete(c) => c.run(ctx).await,
+        Command::History(c) => c.run(ctx).await,
+        Command::List(c) => c.run(ctx).await,
+        Command::Count(c) => c.run(ctx).await,
+        Command::Clear(c) => c.run(ctx).await,
+        Command::Consolidate(c) => c.run(ctx).await,
+        Command::Export(c) => c.run(ctx).await,
+        Command::Import(c) => c.run(ctx).await,
+        Command::Config(c) => c.run(ctx),
     }
 }

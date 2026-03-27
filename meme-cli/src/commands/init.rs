@@ -19,8 +19,11 @@ impl InitCmd {
     /// # Errors
     ///
     /// Returns an error if initialization fails.
-    pub fn run(&self) -> anyhow::Result<()> {
-        let config_path = config_loader::default_config_path();
+    pub fn run(&self, ctx: &super::Context) -> anyhow::Result<()> {
+        let config_path = ctx
+            .config_path
+            .clone()
+            .unwrap_or_else(config_loader::default_config_path);
 
         if config_path.exists() && !self.force {
             println!("Configuration already exists at: {}", config_path.display());
