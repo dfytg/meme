@@ -3,6 +3,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::future_not_send)]
 
 mod commands;
+mod config_loader;
 
 use clap::{Parser, Subcommand};
 

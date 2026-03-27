@@ -1,6 +1,8 @@
-//! Configuration system with TOML file + environment variable support.
-
-use std::path::{Path, PathBuf};
+//! Configuration — pure data structures with defaults and validation.
+//!
+//! All I/O (file loading, environment variable overrides, saving) is the
+//! responsibility of the application layer (e.g. `meme-cli`).  The library
+//! only provides [`Config`] as a plain `Serialize`/`Deserialize` struct.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,54 +24,6 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load configuration from a TOML file, with environment variable overrides.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read or parsed.
-    pub fn from_file(path: &Path) -> Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let mut config: Self = toml::from_str(&content)?;
-        config.apply_env_overrides();
-        Ok(config)
-    }
-
-    /// Load configuration from the default location (`~/.meme/config.toml`),
-    /// falling back to defaults if the file does not exist.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file exists but cannot be parsed.
-    pub fn load_default() -> Result<Self> {
-        let path = default_config_path();
-        if path.exists() {
-            match Self::from_file(&path) {
-                Ok(c) => return Ok(c),
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "config parse failed, using defaults");
-                }
-            }
-        }
-        let mut config = Self::default();
-        config.apply_env_overrides();
-        Ok(config)
-    }
-
-    /// Save configuration to a TOML file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be written.
-    pub fn save(&self, path: &Path) -> Result<()> {
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| Error::Config(format!("failed to serialize config: {e}")))?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, content)?;
-        Ok(())
-    }
-
     /// Validate configuration for common mistakes.
     ///
     /// # Errors
@@ -93,28 +47,13 @@ impl Config {
         }
         Ok(())
     }
-
-    fn apply_env_overrides(&mut self) {
-        if let Ok(v) = std::env::var("MEME_LLM_API_KEY") {
-            self.llm.api_key = Some(v);
-        }
-        if let Ok(v) = std::env::var("MEME_LLM_BASE_URL") {
-            self.llm.base_url = v;
-        }
-        if let Ok(v) = std::env::var("MEME_LLM_MODEL") {
-            self.llm.model = v;
-        }
-        if let Ok(v) = std::env::var("MEME_EMBEDDING_PROVIDER") {
-            self.embedding.provider = v.parse().unwrap_or(self.embedding.provider);
-        }
-    }
 }
 
 /// LLM provider configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
-    /// API key (can also be set via `MEME_LLM_API_KEY`).
+    /// API key.
     pub api_key: Option<String>,
     /// Base URL for the OpenAI-compatible API.
     pub base_url: String,
@@ -198,10 +137,9 @@ pub struct StoreConfig {
 
 impl Default for StoreConfig {
     fn default() -> Self {
-        let base = default_data_dir();
         Self {
-            lancedb_path: base.join("lancedb").to_string_lossy().into_owned(),
-            history_db_path: base.join("history.db").to_string_lossy().into_owned(),
+            lancedb_path: ".meme/lancedb".to_owned(),
+            history_db_path: ".meme/history.db".to_owned(),
             table_name: "memories".to_owned(),
         }
     }
@@ -254,18 +192,6 @@ impl Default for PipelineConfig {
             custom_answer_prompt: None,
         }
     }
-}
-
-/// Returns the default data directory (`~/.meme/`).
-fn default_data_dir() -> PathBuf {
-    directories::BaseDirs::new()
-        .map_or_else(|| PathBuf::from(".meme"), |d| d.home_dir().join(".meme"))
-}
-
-/// Returns the default config file path (`~/.meme/config.toml`).
-#[must_use]
-pub fn default_config_path() -> PathBuf {
-    default_data_dir().join("config.toml")
 }
 
 #[cfg(test)]

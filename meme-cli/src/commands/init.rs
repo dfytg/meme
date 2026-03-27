@@ -1,7 +1,9 @@
 //! `meme init` — initialize configuration and database.
 
 use clap::Args;
-use meme::config::{Config, default_config_path};
+use meme::config::Config;
+
+use crate::config_loader;
 
 /// Initialize meme configuration and database.
 #[derive(Debug, Args)]
@@ -18,7 +20,7 @@ impl InitCmd {
     ///
     /// Returns an error if initialization fails.
     pub fn run(&self) -> anyhow::Result<()> {
-        let config_path = default_config_path();
+        let config_path = config_loader::default_config_path();
 
         if config_path.exists() && !self.force {
             println!("Configuration already exists at: {}", config_path.display());
@@ -27,7 +29,7 @@ impl InitCmd {
         }
 
         let config = Config::default();
-        config.save(&config_path)?;
+        config_loader::save(&config, &config_path)?;
 
         println!("Configuration created at: {}", config_path.display());
         println!();

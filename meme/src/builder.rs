@@ -87,9 +87,7 @@ impl MemeBuilder {
     ///
     /// Returns an error if configuration is invalid or storage cannot be initialized.
     pub async fn build(self) -> Result<Meme> {
-        let mut config = self
-            .config
-            .unwrap_or_else(|| Config::load_default().unwrap_or_default());
+        let mut config = self.config.unwrap_or_default();
 
         if let Some(key) = self.api_key {
             config.llm.api_key = Some(key);

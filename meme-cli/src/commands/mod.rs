@@ -13,6 +13,8 @@ pub mod update;
 
 use meme::{Meme, MemeBuilder};
 
+use crate::config_loader;
+
 /// UTF-8 safe string truncation for display.
 pub fn truncate_str(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
@@ -24,8 +26,12 @@ pub fn truncate_str(s: &str, max_chars: usize) -> String {
 }
 
 /// Build a [`Meme`] instance with optional scope parameters.
+///
+/// Loads configuration from `~/.meme/config.toml` (if present) with
+/// environment variable overrides, then constructs the `Meme` instance.
 pub async fn build_meme(user_id: Option<&str>, session_id: Option<&str>) -> anyhow::Result<Meme> {
-    let mut builder = MemeBuilder::new();
+    let config = config_loader::load_default();
+    let mut builder = MemeBuilder::new().config(config);
     if let Some(uid) = user_id {
         builder = builder.user_id(uid);
     }
