@@ -25,10 +25,8 @@ use crate::config_loader;
 /// Global options shared across all subcommands.
 #[derive(Debug)]
 pub struct Context {
-    /// User identifier for memory isolation.
-    pub user_id: Option<String>,
-    /// Session identifier for memory isolation.
-    pub session_id: Option<String>,
+    /// Namespace for memory isolation.
+    pub namespace: Option<String>,
     /// Custom config file path.
     pub config_path: Option<PathBuf>,
 }
@@ -44,11 +42,8 @@ impl Context {
             None => config_loader::load_default(),
         };
         let mut builder = MemeBuilder::new().config(config);
-        if let Some(uid) = &self.user_id {
-            builder = builder.user_id(uid);
-        }
-        if let Some(sid) = &self.session_id {
-            builder = builder.session_id(sid);
+        if let Some(ns) = &self.namespace {
+            builder = builder.namespace(ns);
         }
         builder.build().await.map_err(|e| anyhow::anyhow!("{e}"))
     }

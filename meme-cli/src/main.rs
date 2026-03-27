@@ -13,13 +13,9 @@ use clap::{Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(name = "meme", version, about)]
 struct Cli {
-    /// User identifier for memory isolation.
-    #[arg(long, global = true)]
-    user_id: Option<String>,
-
-    /// Session identifier for memory isolation.
-    #[arg(long, global = true)]
-    session_id: Option<String>,
+    /// Namespace for memory isolation (opaque, caller-defined).
+    #[arg(long, short = 'n', global = true)]
+    namespace: Option<String>,
 
     /// Path to configuration file (default: ~/.meme/config.toml).
     #[arg(long, global = true, value_name = "PATH")]
@@ -75,8 +71,7 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
 
     let ctx = commands::Context {
-        user_id: cli.user_id,
-        session_id: cli.session_id,
+        namespace: cli.namespace,
         config_path: cli.config,
     };
 

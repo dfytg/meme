@@ -142,9 +142,9 @@ async fn scoped_isolation() {
     let store = temp_store(8).await;
 
     let mut e1 = dummy_entry("User A data");
-    e1.user_id = Some("user_a".into());
+    e1.namespace = Some("user_a".into());
     let mut e2 = dummy_entry("User B data");
-    e2.user_id = Some("user_b".into());
+    e2.namespace = Some("user_b".into());
 
     store
         .add_entries(&[e1, e2], &[random_vec(8), random_vec(8)])
@@ -152,12 +152,10 @@ async fn scoped_isolation() {
         .unwrap();
 
     let scope_a = Scope {
-        user_id: Some("user_a".into()),
-        session_id: None,
+        namespace: Some("user_a".into()),
     };
     let scope_b = Scope {
-        user_id: Some("user_b".into()),
-        session_id: None,
+        namespace: Some("user_b".into()),
     };
 
     assert_eq!(store.count(&scope_a).await.unwrap(), 1);
@@ -173,9 +171,9 @@ async fn scoped_clear() {
     let store = temp_store(8).await;
 
     let mut e1 = dummy_entry("User A data");
-    e1.user_id = Some("user_a".into());
+    e1.namespace = Some("user_a".into());
     let mut e2 = dummy_entry("User B data");
-    e2.user_id = Some("user_b".into());
+    e2.namespace = Some("user_b".into());
 
     store
         .add_entries(&[e1, e2], &[random_vec(8), random_vec(8)])
@@ -183,8 +181,7 @@ async fn scoped_clear() {
         .unwrap();
 
     let scope_a = Scope {
-        user_id: Some("user_a".into()),
-        session_id: None,
+        namespace: Some("user_a".into()),
     };
     store.clear(&scope_a).await.unwrap();
 

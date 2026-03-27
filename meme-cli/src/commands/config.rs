@@ -35,11 +35,8 @@ impl ConfigCmd {
                 "(not found, using defaults)"
             }
         );
-        if let Some(uid) = &ctx.user_id {
-            println!("User ID:     {uid}");
-        }
-        if let Some(sid) = &ctx.session_id {
-            println!("Session ID:  {sid}");
+        if let Some(ns) = &ctx.namespace {
+            println!("Namespace:   {ns}");
         }
         println!();
         println!("{}", toml::to_string_pretty(&config)?);

@@ -16,18 +16,10 @@ use crate::model::{Memory, MetadataFilter, Scope};
 /// Build a SQL WHERE clause fragment for a [`Scope`].
 /// Returns `None` if no scope is set.
 fn scope_to_where_clause(scope: &Scope) -> Option<String> {
-    let mut parts = Vec::new();
-    if let Some(uid) = &scope.user_id {
-        parts.push(format!("user_id = '{}'", escape_sql_string(uid)));
-    }
-    if let Some(sid) = &scope.session_id {
-        parts.push(format!("session_id = '{}'", escape_sql_string(sid)));
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" AND "))
-    }
+    scope
+        .namespace
+        .as_ref()
+        .map(|ns| format!("namespace = '{}'", escape_sql_string(ns)))
 }
 
 /// `LanceDB`-backed vector store with multi-view indexing.
@@ -95,8 +87,7 @@ impl VectorStore {
             Field::new("persons", DataType::Utf8, false),
             Field::new("entities", DataType::Utf8, false),
             Field::new("topic", DataType::Utf8, true),
-            Field::new("user_id", DataType::Utf8, true),
-            Field::new("session_id", DataType::Utf8, true),
+            Field::new("namespace", DataType::Utf8, true),
             Field::new(
                 "vector",
                 DataType::FixedSizeList(
@@ -158,8 +149,7 @@ impl VectorStore {
         let per_col = col("persons");
         let ent_col = col("entities");
         let topic_col = col("topic");
-        let uid_col = col("user_id");
-        let sid_col = col("session_id");
+        let ns_col = col("namespace");
 
         (0..batch.num_rows())
             .map(|i| {
@@ -192,8 +182,7 @@ impl VectorStore {
                         .map(String::from)
                         .collect(),
                     topic: opt_val(topic_col, i),
-                    user_id: opt_val(uid_col, i),
-                    session_id: opt_val(sid_col, i),
+                    namespace: opt_val(ns_col, i),
                 }
             })
             .collect()
@@ -240,8 +229,7 @@ impl VectorStore {
             col(|e| e.persons.join("||")),
             col(|e| e.entities.join("||")),
             col(|e| e.topic.clone().unwrap_or_default()),
-            col(|e| e.user_id.clone().unwrap_or_default()),
-            col(|e| e.session_id.clone().unwrap_or_default()),
+            col(|e| e.namespace.clone().unwrap_or_default()),
             build_vector_column(vectors, self.dimension)?,
         ];
 
@@ -541,17 +529,10 @@ impl VectorStore {
 }
 
 fn scope_matches(entry: &Memory, scope: &Scope) -> bool {
-    if let Some(uid) = &scope.user_id
-        && entry.user_id.as_deref() != Some(uid.as_str())
-    {
-        return false;
-    }
-    if let Some(sid) = &scope.session_id
-        && entry.session_id.as_deref() != Some(sid.as_str())
-    {
-        return false;
-    }
-    true
+    scope
+        .namespace
+        .as_ref()
+        .is_none_or(|ns| entry.namespace.as_deref() == Some(ns.as_str()))
 }
 
 fn str_val(col: Option<&StringArray>, i: usize) -> String {
@@ -649,27 +630,13 @@ mod tests {
     }
 
     #[test]
-    fn scope_user_only() {
+    fn scope_with_namespace() {
         let s = Scope {
-            user_id: Some("alice".into()),
-            session_id: None,
+            namespace: Some("alice".into()),
         };
         let clause = scope_to_where_clause(&s).unwrap();
-        assert!(clause.contains("user_id"));
+        assert!(clause.contains("namespace"));
         assert!(clause.contains("alice"));
-        assert!(!clause.contains("session_id"));
-    }
-
-    #[test]
-    fn scope_both() {
-        let s = Scope {
-            user_id: Some("bob".into()),
-            session_id: Some("s1".into()),
-        };
-        let clause = scope_to_where_clause(&s).unwrap();
-        assert!(clause.contains("user_id"));
-        assert!(clause.contains("session_id"));
-        assert!(clause.contains("AND"));
     }
 
     #[test]
@@ -680,23 +647,21 @@ mod tests {
     }
 
     #[test]
-    fn scope_matches_user_hit() {
+    fn scope_matches_namespace_hit() {
         let mut e = Memory::new("test");
-        e.user_id = Some("alice".into());
+        e.namespace = Some("alice".into());
         let s = Scope {
-            user_id: Some("alice".into()),
-            session_id: None,
+            namespace: Some("alice".into()),
         };
         assert!(scope_matches(&e, &s));
     }
 
     #[test]
-    fn scope_matches_user_miss() {
+    fn scope_matches_namespace_miss() {
         let mut e = Memory::new("test");
-        e.user_id = Some("bob".into());
+        e.namespace = Some("bob".into());
         let s = Scope {
-            user_id: Some("alice".into()),
-            session_id: None,
+            namespace: Some("alice".into()),
         };
         assert!(!scope_matches(&e, &s));
     }
@@ -716,10 +681,9 @@ mod tests {
     #[test]
     fn scope_with_underscore_no_escape() {
         let s = Scope {
-            user_id: Some("user_a".into()),
-            session_id: None,
+            namespace: Some("user_a".into()),
         };
         let clause = scope_to_where_clause(&s).unwrap();
-        assert_eq!(clause, "user_id = 'user_a'");
+        assert_eq!(clause, "namespace = 'user_a'");
     }
 }

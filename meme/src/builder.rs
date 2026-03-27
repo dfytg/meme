@@ -21,8 +21,7 @@ pub struct MemeBuilder {
     model: Option<String>,
     base_url: Option<String>,
     clear_db: bool,
-    user_id: Option<String>,
-    session_id: Option<String>,
+    namespace: Option<String>,
 }
 
 impl MemeBuilder {
@@ -67,17 +66,13 @@ impl MemeBuilder {
         self
     }
 
-    /// Set the user identifier for multi-tenant isolation.
+    /// Set the namespace for memory isolation.
+    ///
+    /// The library treats this as an opaque string — callers decide the
+    /// semantics (user ID, session ID, composite key, etc.).
     #[must_use]
-    pub fn user_id(mut self, id: impl Into<String>) -> Self {
-        self.user_id = Some(id.into());
-        self
-    }
-
-    /// Set the session identifier for multi-session isolation.
-    #[must_use]
-    pub fn session_id(mut self, id: impl Into<String>) -> Self {
-        self.session_id = Some(id.into());
+    pub fn namespace(mut self, ns: impl Into<String>) -> Self {
+        self.namespace = Some(ns.into());
         self
     }
 
@@ -145,8 +140,7 @@ impl MemeBuilder {
         );
 
         let scope = Scope {
-            user_id: self.user_id,
-            session_id: self.session_id,
+            namespace: self.namespace,
         };
 
         let retriever = HybridRetriever::new(

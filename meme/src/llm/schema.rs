@@ -59,8 +59,7 @@ impl ExtractedEntry {
             persons: self.persons,
             entities: self.entities,
             topic: self.topic,
-            user_id: None,
-            session_id: None,
+            namespace: None,
         })
     }
 }

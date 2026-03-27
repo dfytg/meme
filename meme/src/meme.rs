@@ -343,11 +343,8 @@ impl Meme {
 
     fn apply_scope(&self, entries: &mut [Memory]) {
         for entry in entries {
-            if entry.user_id.is_none() {
-                entry.user_id.clone_from(&self.scope.user_id);
-            }
-            if entry.session_id.is_none() {
-                entry.session_id.clone_from(&self.scope.session_id);
+            if entry.namespace.is_none() {
+                entry.namespace.clone_from(&self.scope.namespace);
             }
         }
     }

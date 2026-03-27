@@ -1,7 +1,7 @@
 //! Memory history store — tracks all lifecycle events (add/update/delete).
 //!
 //! Uses `SQLite` with WAL mode for ACID-compliant, low-latency persistence.
-//! All queries are scoped by `user_id`/`session_id` for multi-tenant isolation.
+//! All queries are scoped by `namespace` for multi-tenant isolation.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -44,12 +44,11 @@ impl HistoryStore {
                 event_type  TEXT NOT NULL CHECK(event_type IN ('add', 'update', 'delete')),
                 old_content TEXT,
                 new_content TEXT,
-                user_id     TEXT,
-                session_id  TEXT,
+                namespace   TEXT,
                 created_at  TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_events_memory_id  ON events(memory_id);
-            CREATE INDEX IF NOT EXISTS idx_events_scope      ON events(user_id, session_id);
+            CREATE INDEX IF NOT EXISTS idx_events_scope      ON events(namespace);
             CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);",
         )?;
         tracing::info!(path = %path.display(), "history store opened");
@@ -86,21 +85,19 @@ impl HistoryStore {
 
         let conn = Arc::clone(&self.conn);
         let e = event.clone();
-        let uid = scope.user_id.clone();
-        let sid = scope.session_id.clone();
+        let ns = scope.namespace.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = conn.lock().expect("history db lock poisoned");
             conn.execute(
-                "INSERT INTO events (event_id, memory_id, event_type, old_content, new_content, user_id, session_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO events (event_id, memory_id, event_type, old_content, new_content, namespace, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![
                     e.id.to_string(),
                     e.memory_id.to_string(),
                     e.event_type.as_str(),
                     e.old_content,
                     e.new_content,
-                    uid,
-                    sid,
+                    ns,
                     e.timestamp.to_rfc3339(),
                 ],
             )?;
@@ -124,19 +121,17 @@ impl HistoryStore {
     pub async fn get_history(&self, memory_id: Uuid, scope: &Scope) -> Result<Vec<Event>> {
         let conn = Arc::clone(&self.conn);
         let mid = memory_id.to_string();
-        let uid = scope.user_id.clone();
-        let sid = scope.session_id.clone();
+        let ns = scope.namespace.clone();
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().expect("history db lock poisoned");
             let mut stmt = conn.prepare(
                 "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
                  FROM events
                  WHERE memory_id = ?1
-                   AND (user_id IS ?2)
-                   AND (session_id IS ?3)
+                   AND (namespace IS ?2)
                  ORDER BY created_at ASC",
             )?;
-            let rows = stmt.query_map(rusqlite::params![mid, uid, sid], |row| {
+            let rows = stmt.query_map(rusqlite::params![mid, ns], |row| {
                 Ok(RawEvent {
                     event_id: row.get(0)?,
                     memory_id: row.get(1)?,

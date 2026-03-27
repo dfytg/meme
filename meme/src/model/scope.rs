@@ -1,21 +1,21 @@
-//! Tenant scope for multi-user / multi-session isolation.
+//! Namespace-based memory isolation.
 
-/// Tenant scope for multi-user / multi-session isolation.
+/// Opaque namespace for memory isolation.
 ///
 /// When set, all queries are automatically filtered to only return entries
-/// belonging to the specified user and/or session.
+/// belonging to the specified namespace.  The library treats the value as an
+/// opaque string — callers decide the semantics (user ID, session ID,
+/// composite key, etc.).
 #[derive(Debug, Clone, Default)]
 pub struct Scope {
-    /// Filter by user identifier.
-    pub user_id: Option<String>,
-    /// Filter by session identifier.
-    pub session_id: Option<String>,
+    /// Namespace identifier.  `None` means "global / unscoped".
+    pub namespace: Option<String>,
 }
 
 impl Scope {
-    /// Returns `true` if no scope filters are set.
+    /// Returns `true` if no namespace is set.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.user_id.is_none() && self.session_id.is_none()
+        self.namespace.is_none()
     }
 }
