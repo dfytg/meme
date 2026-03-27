@@ -104,14 +104,14 @@ impl MemeBuilder {
 
     /// Set the `LanceDB` storage directory path.
     #[must_use]
-    pub fn lancedb_path(mut self, path: impl Into<String>) -> Self {
+    pub fn lancedb_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.config.store.lancedb_path = path.into();
         self
     }
 
     /// Set the `SQLite` history database file path.
     #[must_use]
-    pub fn history_db_path(mut self, path: impl Into<String>) -> Self {
+    pub fn history_db_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.config.store.history_db_path = path.into();
         self
     }
@@ -212,15 +212,14 @@ impl MemeBuilder {
 
         let store = Arc::new(
             VectorStore::open(
-                &config.store.lancedb_path,
+                &config.store.lancedb_path.to_string_lossy(),
                 &config.store.table_name,
                 embedder.dimension(),
             )
             .await?,
         );
 
-        let history_path = std::path::Path::new(&config.store.history_db_path);
-        let history = Arc::new(HistoryStore::open(history_path)?);
+        let history = Arc::new(HistoryStore::open(&config.store.history_db_path)?);
 
         if self.clear_db {
             store.clear_all().await?;

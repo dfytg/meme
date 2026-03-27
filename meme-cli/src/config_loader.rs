@@ -93,10 +93,10 @@ pub fn apply_env_overrides(config: &mut Config) {
 /// Resolve relative store paths to absolute paths under `~/.meme/`.
 fn resolve_store_paths(config: &mut Config) {
     let base = default_data_dir();
-    if config.store.lancedb_path == ".meme/lancedb" {
-        config.store.lancedb_path = base.join("lancedb").to_string_lossy().into_owned();
+    if config.store.lancedb_path == Path::new(".meme/lancedb") {
+        config.store.lancedb_path = base.join("lancedb");
     }
-    if config.store.history_db_path == ".meme/history.db" {
-        config.store.history_db_path = base.join("history.db").to_string_lossy().into_owned();
+    if config.store.history_db_path == Path::new(".meme/history.db") {
+        config.store.history_db_path = base.join("history.db");
     }
 }

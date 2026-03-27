@@ -4,6 +4,8 @@
 //! responsibility of the application layer (e.g. `meme-cli`).  The library
 //! only provides [`Config`] as a plain `Serialize`/`Deserialize` struct.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
@@ -128,9 +130,9 @@ impl Default for EmbeddingConfig {
 #[serde(default)]
 pub struct StoreConfig {
     /// Path to `LanceDB` storage directory.
-    pub lancedb_path: String,
+    pub lancedb_path: PathBuf,
     /// Path to the `SQLite` history database file.
-    pub history_db_path: String,
+    pub history_db_path: PathBuf,
     /// Memory table name.
     pub table_name: String,
 }
@@ -138,8 +140,8 @@ pub struct StoreConfig {
 impl Default for StoreConfig {
     fn default() -> Self {
         Self {
-            lancedb_path: ".meme/lancedb".to_owned(),
-            history_db_path: ".meme/history.db".to_owned(),
+            lancedb_path: PathBuf::from(".meme/lancedb"),
+            history_db_path: PathBuf::from(".meme/history.db"),
             table_name: "memories".to_owned(),
         }
     }
