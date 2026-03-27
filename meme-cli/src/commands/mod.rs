@@ -17,7 +17,7 @@ pub mod update;
 
 use std::path::PathBuf;
 
-use meme::{Meme, MemeBuilder};
+use meme::Meme;
 use uuid::Uuid;
 
 use crate::config_loader;
@@ -41,7 +41,7 @@ impl Context {
             Some(path) => config_loader::from_file(path)?,
             None => config_loader::load_default(),
         };
-        let mut builder = MemeBuilder::new().config(config);
+        let mut builder = Meme::builder().config(config);
         if let Some(ns) = &self.namespace {
             builder = builder.namespace(ns);
         }

@@ -22,10 +22,10 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use meme::{Dialogue, Meme, MemeBuilder};
+//! use meme::{Dialogue, Meme};
 //!
 //! # async fn example() -> meme::error::Result<()> {
-//! let meme = MemeBuilder::new()
+//! let meme = Meme::builder()
 //!     .api_key("sk-...")
 //!     .model("gpt-4.1-mini")
 //!     .build()

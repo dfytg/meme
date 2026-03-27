@@ -12,49 +12,143 @@ use crate::meme::Meme;
 use crate::pipeline::{Extractor, HybridRetriever};
 use crate::store::{HistoryStore, VectorStore};
 
-/// Builder for constructing a [`Meme`] instance.
-#[derive(Debug, Default)]
+/// Fluent builder for constructing a [`Meme`] instance.
+///
+/// All settings have sensible defaults. Only [`api_key`](Self::api_key) is
+/// required for the default API-based embedding provider.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # async fn example() -> meme::error::Result<()> {
+/// let meme = meme::Meme::builder()
+///     .api_key("sk-...")
+///     .model("gpt-4.1-mini")
+///     .namespace("user-42")
+///     .build()
+///     .await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Load from a TOML file and override specific fields:
+///
+/// ```rust,no_run
+/// # async fn example(config: meme::config::Config) -> meme::error::Result<()> {
+/// let meme = meme::Meme::builder()
+///     .config(config)
+///     .api_key("override-key")
+///     .build()
+///     .await?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Default)]
 pub struct MemeBuilder {
-    config: Option<Config>,
-    api_key: Option<String>,
-    model: Option<String>,
-    base_url: Option<String>,
+    config: Config,
     clear_db: bool,
     namespace: Option<String>,
 }
 
 impl MemeBuilder {
-    /// Create a new builder with defaults.
+    /// Create a new builder with default configuration.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set a full configuration.
+    /// Replace the entire configuration (e.g. loaded from a TOML file).
+    ///
+    /// Subsequent setter calls override individual fields on top of this.
     #[must_use]
     pub fn config(mut self, config: Config) -> Self {
-        self.config = Some(config);
+        self.config = config;
         self
     }
 
-    /// Set the LLM API key (overrides config).
+    /// Set the LLM API key.
     #[must_use]
     pub fn api_key(mut self, key: impl Into<String>) -> Self {
-        self.api_key = Some(key.into());
+        self.config.llm.api_key = Some(key.into());
         self
     }
 
-    /// Set the LLM model name (overrides config).
+    /// Set the LLM model name (e.g. `"gpt-4.1-mini"`).
     #[must_use]
     pub fn model(mut self, model: impl Into<String>) -> Self {
-        self.model = Some(model.into());
+        self.config.llm.model = model.into();
         self
     }
 
-    /// Set the LLM base URL (overrides config).
+    /// Set the LLM base URL (OpenAI-compatible endpoint).
     #[must_use]
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
-        self.base_url = Some(url.into());
+        self.config.llm.base_url = url.into();
+        self
+    }
+
+    /// Set the embedding model name.
+    #[must_use]
+    pub fn embedding_model(mut self, model: impl Into<String>) -> Self {
+        self.config.embedding.model = model.into();
+        self
+    }
+
+    /// Set the embedding vector dimension.
+    #[must_use]
+    pub const fn embedding_dimension(mut self, dim: usize) -> Self {
+        self.config.embedding.dimension = dim;
+        self
+    }
+
+    /// Set the `LanceDB` storage directory path.
+    #[must_use]
+    pub fn lancedb_path(mut self, path: impl Into<String>) -> Self {
+        self.config.store.lancedb_path = path.into();
+        self
+    }
+
+    /// Set the `SQLite` history database file path.
+    #[must_use]
+    pub fn history_db_path(mut self, path: impl Into<String>) -> Self {
+        self.config.store.history_db_path = path.into();
+        self
+    }
+
+    /// Enable or disable LLM-driven query planning.
+    #[must_use]
+    pub const fn enable_planning(mut self, enable: bool) -> Self {
+        self.config.pipeline.enable_planning = enable;
+        self
+    }
+
+    /// Enable or disable reflection-based retrieval refinement.
+    #[must_use]
+    pub const fn enable_reflection(mut self, enable: bool) -> Self {
+        self.config.pipeline.enable_reflection = enable;
+        self
+    }
+
+    /// Set the number of results for semantic (ANN) search.
+    #[must_use]
+    pub const fn semantic_top_k(mut self, k: usize) -> Self {
+        self.config.pipeline.semantic_top_k = k;
+        self
+    }
+
+    /// Enable local ONNX reranker with the given model name.
+    ///
+    /// Requires the `onnx` feature. Example model: `"BAAI/bge-reranker-v2-m3"`.
+    #[must_use]
+    pub fn reranker(mut self, model: impl Into<String>) -> Self {
+        self.config.pipeline.reranker_model = Some(model.into());
+        self
+    }
+
+    /// Set the number of top results to keep after reranking.
+    #[must_use]
+    pub const fn rerank_top_n(mut self, n: usize) -> Self {
+        self.config.pipeline.rerank_top_n = n;
         self
     }
 
@@ -75,24 +169,13 @@ impl MemeBuilder {
         self
     }
 
-    /// Build the `Meme` instance.
+    /// Build the [`Meme`] instance.
     ///
     /// # Errors
     ///
     /// Returns an error if configuration is invalid or storage cannot be initialized.
     pub async fn build(self) -> Result<Meme> {
-        let mut config = self.config.unwrap_or_default();
-
-        if let Some(key) = self.api_key {
-            config.llm.api_key = Some(key);
-        }
-        if let Some(model) = self.model {
-            config.llm.model = model;
-        }
-        if let Some(url) = self.base_url {
-            config.llm.base_url = url;
-        }
-
+        let config = self.config;
         config.validate()?;
 
         let http = build_http_client()?;

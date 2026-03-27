@@ -93,9 +93,9 @@ meme -n alice search "coffee"
 ### Library
 
 ```rust
-use meme::{Dialogue, MemeBuilder};
+use meme::{Dialogue, Meme};
 
-let meme = MemeBuilder::new()
+let meme = Meme::builder()
     .api_key("sk-...")
     .model("gpt-4.1-mini")
     .build()
@@ -131,35 +131,39 @@ See [`examples/basic.rs`](meme/examples/basic.rs) for a runnable demo.
 | Feature | Default | Description |
 | --- | --- | --- |
 | `api-embedding` | **yes** | Remote OpenAI-compatible embedding API |
-| `onnx` | no | Local ONNX embedding via [`fastembed`](https://github.com/Anush008/fastembed-rs) — auto-downloads models from Hugging Face Hub |
+| `onnx` | no | Local ONNX embedding + reranker via [`fastembed`](https://github.com/Anush008/fastembed-rs) — auto-downloads models from Hugging Face Hub |
 
 ## Configuration
 
-**No configuration file is required.** The library is configured entirely through `MemeBuilder`:
+**No configuration file is required.** The library is configured entirely through a fluent builder:
 
 ```rust
-let meme = MemeBuilder::new()
+use meme::Meme;
+
+let meme = Meme::builder()
     .api_key("sk-...")
     .model("gpt-4.1-mini")
     .base_url("https://api.openai.com/v1")
-    .namespace("alice")          // memory isolation
+    .namespace("alice")               // memory isolation
+    .semantic_top_k(25)                // tune retrieval depth
+    .enable_reflection(true)           // iterative completeness checking
+    .reranker("BAAI/bge-reranker-v2-m3") // local cross-encoder reranker (onnx feature)
+    .rerank_top_n(5)
     .build()
     .await?;
 ```
 
-For full control, pass a `Config` struct directly:
+For file-based config (e.g. CLI), load a `Config` and override specific fields:
 
 ```rust
-use meme::config::{Config, LlmConfig, EmbeddingConfig, StoreConfig, PipelineConfig};
+use meme::Meme;
 
-let config = Config {
-    llm: LlmConfig { api_key: Some("sk-...".into()), ..Default::default() },
-    embedding: EmbeddingConfig { model: "text-embedding-3-small".into(), dimension: 1536, ..Default::default() },
-    store: StoreConfig { lancedb_path: "/custom/path/lancedb".into(), ..Default::default() },
-    pipeline: PipelineConfig { semantic_top_k: 25, enable_reflection: true, ..Default::default() },
-};
-
-let meme = MemeBuilder::new().config(config).build().await?;
+let config: meme::config::Config = toml::from_str(&toml_content)?;
+let meme = Meme::builder()
+    .config(config)           // load from TOML
+    .api_key("override-key")  // override specific fields
+    .build()
+    .await?;
 ```
 
 The CLI tool (`meme-cli`) optionally reads `~/.meme/config.toml`. Environment variables override any file or default values:
@@ -199,12 +203,14 @@ semantic_top_k = 25                     # max semantic search results
 keyword_top_k = 5                       # max keyword search results
 structured_top_k = 5                    # max structured search results
 enable_planning = true                  # LLM-driven query analysis
-enable_reflection = true                # iterative completeness checking
+enable_reflection = false               # iterative completeness checking (token-heavy)
 max_reflection_rounds = 2
 max_build_workers = 16                  # parallel extraction workers
 max_retrieval_workers = 8               # parallel search workers
 # custom_extraction_prompt = "..."      # override built-in extraction prompt
 # custom_answer_prompt = "..."          # override built-in answer prompt
+# reranker_model = "BAAI/bge-reranker-v2-m3"  # local cross-encoder reranker (onnx feature)
+rerank_top_n = 10                       # results to keep after reranking
 ```
 
 </details>
