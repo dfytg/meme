@@ -9,7 +9,6 @@ use crate::embedding::{self, Embedder};
 use crate::error::{Error, Result};
 use crate::llm::LlmClient;
 use crate::meme::Meme;
-use crate::model::Scope;
 use crate::pipeline::{Extractor, HybridRetriever};
 use crate::store::{HistoryStore, VectorStore};
 
@@ -139,17 +138,12 @@ impl MemeBuilder {
             config.pipeline.max_build_workers,
         );
 
-        let scope = Scope {
-            namespace: self.namespace,
-        };
-
         let retriever = HybridRetriever::new(
             Arc::clone(&llm),
             Arc::clone(&store),
             Arc::clone(&embedder),
-            &config.pipeline,
-            config.pipeline.max_retrieval_workers,
-            scope.clone(),
+            config.pipeline.clone(),
+            self.namespace.clone(),
         );
 
         tracing::info!("meme system initialized");
@@ -162,7 +156,7 @@ impl MemeBuilder {
             extractor: Mutex::new(extractor),
             retriever,
             config,
-            scope,
+            namespace: self.namespace,
         })
     }
 }

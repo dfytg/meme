@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::VectorStore;
 use crate::error::Result;
-use crate::model::{Memory, Scope};
+use crate::model::Memory;
 
 /// Statistics from a consolidation run.
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
@@ -36,9 +36,9 @@ impl VectorStore {
         decay_factor: f64,
         merge_threshold: f64,
         min_importance: f64,
-        scope: &Scope,
+        namespace: Option<&str>,
     ) -> Result<ConsolidationStats> {
-        let pairs = self.get_all_with_vectors(scope).await?;
+        let pairs = self.get_all_with_vectors(namespace).await?;
         if pairs.is_empty() {
             return Ok(ConsolidationStats::default());
         }
@@ -80,7 +80,7 @@ impl VectorStore {
             let sem = &semaphore;
             async move {
                 let _permit = sem.acquire().await;
-                self.semantic_search(&vectors_ref[i], merge_k, scope)
+                self.semantic_search(&vectors_ref[i], merge_k, namespace)
                     .await
                     .map(|neighbors| (i, neighbors))
             }

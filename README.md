@@ -130,8 +130,7 @@ let meme = MemeBuilder::new()
     .api_key("sk-...")
     .model("gpt-4.1-mini")
     .base_url("https://api.openai.com/v1")
-    .user_id("alice")           // multi-tenant isolation
-    .session_id("session-001")  // multi-session isolation
+    .namespace("alice")          // memory isolation
     .build()
     .await?;
 ```

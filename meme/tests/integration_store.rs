@@ -1,6 +1,6 @@
 //! Integration tests for `LanceDB`-backed `VectorStore`.
 
-use meme::model::{Memory, MetadataFilter, Scope};
+use meme::model::Memory;
 use meme::store::VectorStore;
 
 async fn temp_store(dim: usize) -> VectorStore {
@@ -24,21 +24,19 @@ fn random_vec(dim: usize) -> Vec<f32> {
 #[tokio::test]
 async fn add_and_count() {
     let store = temp_store(8).await;
-    let scope = Scope::default();
 
-    assert_eq!(store.count(&scope).await.unwrap(), 0);
+    assert_eq!(store.count(None).await.unwrap(), 0);
 
     let entries = vec![dummy_entry("Alice met Bob at the park")];
     let vectors = vec![random_vec(8)];
     store.add_entries(&entries, &vectors).await.unwrap();
 
-    assert_eq!(store.count(&scope).await.unwrap(), 1);
+    assert_eq!(store.count(None).await.unwrap(), 1);
 }
 
 #[tokio::test]
 async fn add_multiple_and_get_all() {
     let store = temp_store(8).await;
-    let scope = Scope::default();
 
     let entries = vec![
         dummy_entry("First fact"),
@@ -50,14 +48,13 @@ async fn add_multiple_and_get_all() {
         .collect();
 
     store.add_entries(&entries, &vectors).await.unwrap();
-    let all = store.get_all(&scope).await.unwrap();
+    let all = store.get_all(None).await.unwrap();
     assert_eq!(all.len(), 3);
 }
 
 #[tokio::test]
 async fn semantic_search_returns_results() {
     let store = temp_store(8).await;
-    let scope = Scope::default();
 
     let entries = vec![
         dummy_entry("The weather is sunny today"),
@@ -70,7 +67,7 @@ async fn semantic_search_returns_results() {
         .await
         .unwrap();
 
-    let results = store.semantic_search(&v1, 5, &scope).await.unwrap();
+    let results = store.semantic_search(&v1, 5, None).await.unwrap();
     assert!(!results.is_empty());
     assert_eq!(results[0].content, "The weather is sunny today");
 }
@@ -78,7 +75,6 @@ async fn semantic_search_returns_results() {
 #[tokio::test]
 async fn keyword_search_like_fallback() {
     let store = temp_store(8).await;
-    let scope = Scope::default();
 
     let entries = vec![
         dummy_entry("Alice met Bob at Tokyo station"),
@@ -88,7 +84,7 @@ async fn keyword_search_like_fallback() {
     store.add_entries(&entries, &vectors).await.unwrap();
 
     let results = store
-        .keyword_search(&["Tokyo".into()], 5, &scope)
+        .keyword_search(&["Tokyo".into()], 5, None)
         .await
         .unwrap();
     assert!(
@@ -100,7 +96,6 @@ async fn keyword_search_like_fallback() {
 #[tokio::test]
 async fn structured_search_by_persons() {
     let store = temp_store(8).await;
-    let scope = Scope::default();
 
     let mut e1 = dummy_entry("Alice met Bob");
     e1.persons = vec!["Alice".into(), "Bob".into()];
@@ -112,33 +107,32 @@ async fn structured_search_by_persons() {
         .await
         .unwrap();
 
-    let filter = MetadataFilter {
+    let filter = meme::model::MetadataFilter {
         persons: Some(vec!["Bob".into()]),
         ..Default::default()
     };
-    let results = store.structured_search(&filter, 5, &scope).await.unwrap();
+    let results = store.structured_search(&filter, 5, None).await.unwrap();
     assert!(results.iter().any(|e| e.persons.contains(&"Bob".into())));
 }
 
 #[tokio::test]
 async fn delete_entries_by_id() {
     let store = temp_store(8).await;
-    let scope = Scope::default();
 
     let entries = vec![dummy_entry("To be deleted"), dummy_entry("To be kept")];
     let vectors = vec![random_vec(8), random_vec(8)];
     store.add_entries(&entries, &vectors).await.unwrap();
-    assert_eq!(store.count(&scope).await.unwrap(), 2);
+    assert_eq!(store.count(None).await.unwrap(), 2);
 
     store.delete_entries(&[entries[0].id]).await.unwrap();
-    assert_eq!(store.count(&scope).await.unwrap(), 1);
+    assert_eq!(store.count(None).await.unwrap(), 1);
 
-    let remaining = store.get_all(&scope).await.unwrap();
+    let remaining = store.get_all(None).await.unwrap();
     assert_eq!(remaining[0].content, "To be kept");
 }
 
 #[tokio::test]
-async fn scoped_isolation() {
+async fn namespace_isolation() {
     let store = temp_store(8).await;
 
     let mut e1 = dummy_entry("User A data");
@@ -151,23 +145,16 @@ async fn scoped_isolation() {
         .await
         .unwrap();
 
-    let scope_a = Scope {
-        namespace: Some("user_a".into()),
-    };
-    let scope_b = Scope {
-        namespace: Some("user_b".into()),
-    };
+    assert_eq!(store.count(Some("user_a")).await.unwrap(), 1);
+    assert_eq!(store.count(Some("user_b")).await.unwrap(), 1);
+    assert_eq!(store.count(None).await.unwrap(), 2);
 
-    assert_eq!(store.count(&scope_a).await.unwrap(), 1);
-    assert_eq!(store.count(&scope_b).await.unwrap(), 1);
-    assert_eq!(store.count(&Scope::default()).await.unwrap(), 2);
-
-    let results_a = store.get_all(&scope_a).await.unwrap();
+    let results_a = store.get_all(Some("user_a")).await.unwrap();
     assert_eq!(results_a[0].content, "User A data");
 }
 
 #[tokio::test]
-async fn scoped_clear() {
+async fn namespace_clear() {
     let store = temp_store(8).await;
 
     let mut e1 = dummy_entry("User A data");
@@ -180,13 +167,10 @@ async fn scoped_clear() {
         .await
         .unwrap();
 
-    let scope_a = Scope {
-        namespace: Some("user_a".into()),
-    };
-    store.clear(&scope_a).await.unwrap();
+    store.clear(Some("user_a")).await.unwrap();
 
-    assert_eq!(store.count(&Scope::default()).await.unwrap(), 1);
-    let remaining = store.get_all(&Scope::default()).await.unwrap();
+    assert_eq!(store.count(None).await.unwrap(), 1);
+    let remaining = store.get_all(None).await.unwrap();
     assert_eq!(remaining[0].content, "User B data");
 }
 
@@ -198,10 +182,10 @@ async fn clear_all_removes_everything() {
         .add_entries(&[dummy_entry("data")], &[random_vec(8)])
         .await
         .unwrap();
-    assert_eq!(store.count(&Scope::default()).await.unwrap(), 1);
+    assert_eq!(store.count(None).await.unwrap(), 1);
 
     store.clear_all().await.unwrap();
-    assert_eq!(store.count(&Scope::default()).await.unwrap(), 0);
+    assert_eq!(store.count(None).await.unwrap(), 0);
 }
 
 #[tokio::test]
@@ -244,8 +228,7 @@ async fn get_all_with_vectors_roundtrip() {
         .await
         .unwrap();
 
-    let scope = Scope::default();
-    let pairs = store.get_all_with_vectors(&scope).await.unwrap();
+    let pairs = store.get_all_with_vectors(None).await.unwrap();
     assert_eq!(pairs.len(), 1);
     assert_eq!(pairs[0].0.content, "roundtrip");
     for (a, b) in pairs[0].1.iter().zip(v.iter()) {
@@ -256,7 +239,6 @@ async fn get_all_with_vectors_roundtrip() {
 #[tokio::test]
 async fn update_entry_replaces_content() {
     let store = temp_store(4).await;
-    let scope = Scope::default();
     let entry = dummy_entry("original text");
     let id = entry.id;
     let v = vec![0.1, 0.2, 0.3, 0.4];
@@ -274,7 +256,7 @@ async fn update_entry_replaces_content() {
 
     let fetched = store.get_by_id(id).await.unwrap().unwrap();
     assert_eq!(fetched.content, "updated text");
-    assert_eq!(store.count(&scope).await.unwrap(), 1);
+    assert_eq!(store.count(None).await.unwrap(), 1);
 }
 
 #[tokio::test]
@@ -283,41 +265,34 @@ async fn history_store_record_and_query() {
     std::fs::create_dir_all(&dir).unwrap();
     let db_path = dir.join("history.db");
     let store = meme::store::HistoryStore::open(&db_path).unwrap();
-    let scope = Scope::default();
 
     let mem_id = uuid::Uuid::new_v4();
     store
+        .record(mem_id, meme::EventType::Add, None, Some("hello"), None)
+        .await
+        .unwrap();
+    store
         .record(
             mem_id,
-            meme::model::EventType::Add,
-            None,
+            meme::EventType::Update,
             Some("hello"),
-            &scope,
+            Some("hello world"),
+            None,
         )
         .await
         .unwrap();
     store
         .record(
             mem_id,
-            meme::model::EventType::Update,
-            Some("hello"),
-            Some("hello world"),
-            &scope,
-        )
-        .await
-        .unwrap();
-    store
-        .record(
-            mem_id,
-            meme::model::EventType::Delete,
+            meme::EventType::Delete,
             Some("hello world"),
             None,
-            &scope,
+            None,
         )
         .await
         .unwrap();
 
-    let events = store.get_history(mem_id, &scope).await.unwrap();
+    let events = store.get_history(mem_id, None).await.unwrap();
     assert_eq!(events.len(), 3);
     assert_eq!(events[0].event_type.as_str(), "add");
     assert_eq!(events[1].event_type.as_str(), "update");
@@ -327,6 +302,6 @@ async fn history_store_record_and_query() {
     assert_eq!(events[1].new_content.as_deref(), Some("hello world"));
 
     let other_id = uuid::Uuid::new_v4();
-    let empty = store.get_history(other_id, &scope).await.unwrap();
+    let empty = store.get_history(other_id, None).await.unwrap();
     assert!(empty.is_empty());
 }

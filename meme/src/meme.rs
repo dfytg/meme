@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::embedding::Embedder;
 use crate::error::{Error, Result};
 use crate::llm::{self, LlmClient, ReExtractResponse};
-use crate::model::{Dialogue, Event, EventType, Memory, Scope};
+use crate::model::{Dialogue, Event, EventType, Memory};
 use crate::pipeline::{self, Extractor, HybridRetriever};
 use crate::store::{ConsolidationStats, HistoryStore, VectorStore};
 
@@ -28,7 +28,7 @@ pub struct Meme {
     pub(crate) extractor: Mutex<Extractor>,
     pub(crate) retriever: HybridRetriever,
     pub(crate) config: Config,
-    pub(crate) scope: Scope,
+    pub(crate) namespace: Option<String>,
 }
 
 impl std::fmt::Debug for Meme {
@@ -121,24 +121,13 @@ impl Meme {
             return Ok(());
         }
         let mut scoped: Vec<Memory> = entries.to_vec();
-        self.apply_scope(&mut scoped);
+        self.apply_namespace(&mut scoped);
         let texts: Vec<&str> = scoped.iter().map(|e| e.content.as_str()).collect();
         let vectors = self.embedder.encode_documents(&texts).await?;
         self.store.add_entries(&scoped, &vectors).await?;
         for entry in &scoped {
-            if let Err(e) = self
-                .history
-                .record(
-                    entry.id,
-                    EventType::Add,
-                    None,
-                    Some(&entry.content),
-                    &self.scope,
-                )
-                .await
-            {
-                tracing::warn!(memory_id = %entry.id, error = %e, "history record failed");
-            }
+            self.record_event(entry.id, EventType::Add, None, Some(&entry.content))
+                .await;
         }
         Ok(())
     }
@@ -177,19 +166,13 @@ impl Meme {
             .next()
             .ok_or_else(|| Error::Embedding("empty embedding".into()))?;
         self.store.update_entry(&updated, &vec).await?;
-        if let Err(e) = self
-            .history
-            .record(
-                id,
-                EventType::Update,
-                Some(&existing.content),
-                Some(new_content),
-                &self.scope,
-            )
-            .await
-        {
-            tracing::warn!(memory_id = %id, error = %e, "history record failed");
-        }
+        self.record_event(
+            id,
+            EventType::Update,
+            Some(&existing.content),
+            Some(new_content),
+        )
+        .await;
         Ok(())
     }
 
@@ -230,19 +213,8 @@ impl Meme {
             .ok_or_else(|| Error::NotFound { id: id.to_string() })?;
 
         self.store.delete_entries(&[id]).await?;
-        if let Err(e) = self
-            .history
-            .record(
-                id,
-                EventType::Delete,
-                Some(&existing.content),
-                None,
-                &self.scope,
-            )
-            .await
-        {
-            tracing::warn!(memory_id = %id, error = %e, "history record failed");
-        }
+        self.record_event(id, EventType::Delete, Some(&existing.content), None)
+            .await;
         Ok(())
     }
 
@@ -264,7 +236,7 @@ impl Meme {
     ///
     /// Returns an error if the history query fails.
     pub async fn history(&self, memory_id: Uuid) -> Result<Vec<Event>> {
-        self.history.get_history(memory_id, &self.scope).await
+        self.history.get_history(memory_id, self.ns()).await
     }
 
     /// Ask a question — the core Q&A interface.
@@ -291,7 +263,7 @@ impl Meme {
     ///
     /// Returns an error if the read operation fails.
     pub async fn list(&self) -> Result<Vec<Memory>> {
-        self.store.get_all(&self.scope).await
+        self.store.get_all(self.ns()).await
     }
 
     /// Count stored memory entries.
@@ -300,7 +272,7 @@ impl Meme {
     ///
     /// Returns an error if the count operation fails.
     pub async fn count(&self) -> Result<usize> {
-        self.store.count(&self.scope).await
+        self.store.count(self.ns()).await
     }
 
     /// Clear stored memories for the current scope.
@@ -309,7 +281,7 @@ impl Meme {
     ///
     /// Returns an error if the clear operation fails.
     pub async fn clear(&self) -> Result<()> {
-        self.store.clear(&self.scope).await
+        self.store.clear(self.ns()).await
     }
 
     /// Consolidate memory: decay old entries, merge near-duplicates, prune low-importance.
@@ -330,7 +302,7 @@ impl Meme {
                 decay_factor,
                 merge_threshold,
                 min_importance,
-                &self.scope,
+                self.ns(),
             )
             .await
     }
@@ -341,47 +313,59 @@ impl Meme {
         &self.config
     }
 
-    fn apply_scope(&self, entries: &mut [Memory]) {
+    fn ns(&self) -> Option<&str> {
+        self.namespace.as_deref()
+    }
+
+    fn apply_namespace(&self, entries: &mut [Memory]) {
         for entry in entries {
             if entry.namespace.is_none() {
-                entry.namespace.clone_from(&self.scope.namespace);
+                entry.namespace.clone_from(&self.namespace);
             }
+        }
+    }
+
+    async fn record_event(
+        &self,
+        memory_id: Uuid,
+        event_type: EventType,
+        old: Option<&str>,
+        new: Option<&str>,
+    ) {
+        if let Err(e) = self
+            .history
+            .record(memory_id, event_type, old, new, self.ns())
+            .await
+        {
+            tracing::warn!(%memory_id, error = %e, "history record failed");
         }
     }
 
     async fn ingest_entries(&self, entries: &[Memory]) -> Result<()> {
         let mut scoped: Vec<Memory> = entries.to_vec();
-        self.apply_scope(&mut scoped);
+        self.apply_namespace(&mut scoped);
 
         let texts: Vec<&str> = scoped.iter().map(|e| e.content.as_str()).collect();
         let vectors = self.embedder.encode_documents(&texts).await?;
 
-        let existing_count = self.store.count(&self.scope).await?;
+        let existing_count = self.store.count(self.ns()).await?;
         if existing_count == 0 {
             self.store.add_entries(&scoped, &vectors).await?;
-            self.record_history_batch(&scoped, EventType::Add).await;
+            for entry in &scoped {
+                self.record_event(entry.id, EventType::Add, None, Some(&entry.content))
+                    .await;
+            }
             return Ok(());
         }
 
         let (to_add, vecs_add, deletes) =
-            pipeline::reconciler::reconcile(&self.llm, &self.store, &self.scope, &scoped, &vectors)
+            pipeline::reconciler::reconcile(&self.llm, &self.store, self.ns(), &scoped, &vectors)
                 .await?;
 
         if !deletes.is_empty() {
             for (uid, old_content) in &deletes {
-                if let Err(e) = self
-                    .history
-                    .record(
-                        *uid,
-                        EventType::Delete,
-                        Some(old_content),
-                        None,
-                        &self.scope,
-                    )
-                    .await
-                {
-                    tracing::warn!(memory_id = %uid, error = %e, "history record failed");
-                }
+                self.record_event(*uid, EventType::Delete, Some(old_content), None)
+                    .await;
             }
             let ids: Vec<Uuid> = deletes.iter().map(|(uid, _)| *uid).collect();
             self.store.delete_entries(&ids).await?;
@@ -390,26 +374,11 @@ impl Meme {
 
         if !to_add.is_empty() {
             self.store.add_entries(&to_add, &vecs_add).await?;
-            self.record_history_batch(&to_add, EventType::Add).await;
-        }
-        Ok(())
-    }
-
-    async fn record_history_batch(&self, entries: &[Memory], event_type: EventType) {
-        for entry in entries {
-            if let Err(e) = self
-                .history
-                .record(
-                    entry.id,
-                    event_type,
-                    None,
-                    Some(&entry.content),
-                    &self.scope,
-                )
-                .await
-            {
-                tracing::warn!(memory_id = %entry.id, error = %e, "history record failed");
+            for entry in &to_add {
+                self.record_event(entry.id, EventType::Add, None, Some(&entry.content))
+                    .await;
             }
         }
+        Ok(())
     }
 }

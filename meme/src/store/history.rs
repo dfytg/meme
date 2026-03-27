@@ -11,7 +11,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
-use crate::model::{Event, EventType, Scope};
+use crate::model::{Event, EventType};
 
 /// Persistent store for memory lifecycle events backed by `SQLite`.
 pub struct HistoryStore {
@@ -72,7 +72,7 @@ impl HistoryStore {
         event_type: EventType,
         old_content: Option<&str>,
         new_content: Option<&str>,
-        scope: &Scope,
+        namespace: Option<&str>,
     ) -> Result<Event> {
         let event = Event {
             id: Uuid::new_v4(),
@@ -85,7 +85,7 @@ impl HistoryStore {
 
         let conn = Arc::clone(&self.conn);
         let e = event.clone();
-        let ns = scope.namespace.clone();
+        let ns = namespace.map(String::from);
         tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = conn.lock().expect("history db lock poisoned");
             conn.execute(
@@ -118,10 +118,14 @@ impl HistoryStore {
     /// # Panics
     ///
     /// Panics if the internal mutex is poisoned.
-    pub async fn get_history(&self, memory_id: Uuid, scope: &Scope) -> Result<Vec<Event>> {
+    pub async fn get_history(
+        &self,
+        memory_id: Uuid,
+        namespace: Option<&str>,
+    ) -> Result<Vec<Event>> {
         let conn = Arc::clone(&self.conn);
         let mid = memory_id.to_string();
-        let ns = scope.namespace.clone();
+        let ns = namespace.map(String::from);
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().expect("history db lock poisoned");
             let mut stmt = conn.prepare(

@@ -11,15 +11,12 @@ use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::error::{Error, Result};
-use crate::model::{Memory, MetadataFilter, Scope};
+use crate::model::{Memory, MetadataFilter};
 
-/// Build a SQL WHERE clause fragment for a [`Scope`].
-/// Returns `None` if no scope is set.
-fn scope_to_where_clause(scope: &Scope) -> Option<String> {
-    scope
-        .namespace
-        .as_ref()
-        .map(|ns| format!("namespace = '{}'", escape_sql_string(ns)))
+/// Build a SQL WHERE clause fragment for a namespace filter.
+fn namespace_clause(ns: Option<&str>) -> Option<String> {
+    let ns = ns?;
+    Some(format!("namespace = '{}'", escape_sql_string(ns)))
 }
 
 /// `LanceDB`-backed vector store with multi-view indexing.
@@ -254,7 +251,7 @@ impl VectorStore {
         &self,
         query_vec: &[f32],
         top_k: usize,
-        scope: &Scope,
+        namespace: Option<&str>,
     ) -> Result<Vec<Memory>> {
         let table = self.get_table().await?;
         if table.count_rows(None).await? == 0 {
@@ -262,7 +259,7 @@ impl VectorStore {
         }
         let mut q = table.query().nearest_to(query_vec)?;
         q = q.limit(top_k);
-        if let Some(clause) = scope_to_where_clause(scope) {
+        if let Some(clause) = namespace_clause(namespace) {
             q = q.only_if(clause);
         }
         self.collect_entries(q.execute().await?).await
@@ -277,7 +274,7 @@ impl VectorStore {
         &self,
         keywords: &[String],
         top_k: usize,
-        scope: &Scope,
+        namespace: Option<&str>,
     ) -> Result<Vec<Memory>> {
         if keywords.is_empty() {
             return Ok(Vec::new());
@@ -287,7 +284,7 @@ impl VectorStore {
             return Ok(Vec::new());
         }
 
-        let scope_clause = scope_to_where_clause(scope);
+        let ns_clause = namespace_clause(namespace);
         let fts_query = keywords.join(" ");
 
         // Try FTS first; fall back to LIKE on failure.
@@ -301,8 +298,8 @@ impl VectorStore {
             .await
         {
             let mut entries = self.collect_entries(stream).await?;
-            if scope_clause.is_some() {
-                entries.retain(|e| scope_matches(e, scope));
+            if ns_clause.is_some() {
+                entries.retain(|e| namespace_matches(e, namespace));
             }
             return Ok(entries);
         }
@@ -315,7 +312,7 @@ impl VectorStore {
             })
             .collect();
         let mut where_clause = format!("({})", conditions.join(" OR "));
-        if let Some(sc) = &scope_clause {
+        if let Some(sc) = &ns_clause {
             where_clause = format!("{where_clause} AND {sc}");
         }
 
@@ -337,7 +334,7 @@ impl VectorStore {
         &self,
         filter: &MetadataFilter,
         top_k: usize,
-        scope: &Scope,
+        namespace: Option<&str>,
     ) -> Result<Vec<Memory>> {
         if filter.is_empty() {
             return Ok(Vec::new());
@@ -381,7 +378,7 @@ impl VectorStore {
         }
 
         let mut where_clause = conditions.join(" AND ");
-        if let Some(sc) = scope_to_where_clause(scope) {
+        if let Some(sc) = namespace_clause(namespace) {
             where_clause = format!("{where_clause} AND {sc}");
         }
         let stream = table
@@ -398,10 +395,10 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the read operation fails.
-    pub async fn get_all(&self, scope: &Scope) -> Result<Vec<Memory>> {
+    pub async fn get_all(&self, namespace: Option<&str>) -> Result<Vec<Memory>> {
         let table = self.get_table().await?;
         let mut q = table.query();
-        if let Some(clause) = scope_to_where_clause(scope) {
+        if let Some(clause) = namespace_clause(namespace) {
             q = q.only_if(clause);
         }
         self.collect_entries(q.execute().await?).await
@@ -412,10 +409,13 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the read operation fails.
-    pub async fn get_all_with_vectors(&self, scope: &Scope) -> Result<Vec<(Memory, Vec<f32>)>> {
+    pub async fn get_all_with_vectors(
+        &self,
+        namespace: Option<&str>,
+    ) -> Result<Vec<(Memory, Vec<f32>)>> {
         let table = self.get_table().await?;
         let mut q = table.query();
-        if let Some(clause) = scope_to_where_clause(scope) {
+        if let Some(clause) = namespace_clause(namespace) {
             q = q.only_if(clause);
         }
         let batches: Vec<RecordBatch> = q.execute().await?.try_collect().await?;
@@ -483,9 +483,9 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the count operation fails.
-    pub async fn count(&self, scope: &Scope) -> Result<usize> {
+    pub async fn count(&self, namespace: Option<&str>) -> Result<usize> {
         let table = self.get_table().await?;
-        Ok(table.count_rows(scope_to_where_clause(scope)).await?)
+        Ok(table.count_rows(namespace_clause(namespace)).await?)
     }
 
     async fn collect_entries(
@@ -503,8 +503,8 @@ impl VectorStore {
     /// # Errors
     ///
     /// Returns an error if the delete operation fails.
-    pub async fn clear(&self, scope: &Scope) -> Result<()> {
-        if let Some(clause) = scope_to_where_clause(scope) {
+    pub async fn clear(&self, namespace: Option<&str>) -> Result<()> {
+        if let Some(clause) = namespace_clause(namespace) {
             let table = self.get_table().await?;
             table.delete(&clause).await?;
             tracing::info!(table = %self.table_name, %clause, "cleared scoped entries");
@@ -528,11 +528,8 @@ impl VectorStore {
     }
 }
 
-fn scope_matches(entry: &Memory, scope: &Scope) -> bool {
-    scope
-        .namespace
-        .as_ref()
-        .is_none_or(|ns| entry.namespace.as_deref() == Some(ns.as_str()))
+fn namespace_matches(entry: &Memory, namespace: Option<&str>) -> bool {
+    namespace.is_none_or(|ns| entry.namespace.as_deref() == Some(ns))
 }
 
 fn str_val(col: Option<&StringArray>, i: usize) -> String {
@@ -624,46 +621,35 @@ mod tests {
     }
 
     #[test]
-    fn scope_empty_no_clause() {
-        let s = Scope::default();
-        assert!(scope_to_where_clause(&s).is_none());
+    fn namespace_none_no_clause() {
+        assert!(namespace_clause(None).is_none());
     }
 
     #[test]
-    fn scope_with_namespace() {
-        let s = Scope {
-            namespace: Some("alice".into()),
-        };
-        let clause = scope_to_where_clause(&s).unwrap();
+    fn namespace_some_clause() {
+        let clause = namespace_clause(Some("alice")).unwrap();
         assert!(clause.contains("namespace"));
         assert!(clause.contains("alice"));
     }
 
     #[test]
-    fn scope_matches_no_scope() {
+    fn namespace_matches_none() {
         let e = Memory::new("test");
-        let s = Scope::default();
-        assert!(scope_matches(&e, &s));
+        assert!(namespace_matches(&e, None));
     }
 
     #[test]
-    fn scope_matches_namespace_hit() {
+    fn namespace_matches_hit() {
         let mut e = Memory::new("test");
         e.namespace = Some("alice".into());
-        let s = Scope {
-            namespace: Some("alice".into()),
-        };
-        assert!(scope_matches(&e, &s));
+        assert!(namespace_matches(&e, Some("alice")));
     }
 
     #[test]
-    fn scope_matches_namespace_miss() {
+    fn namespace_matches_miss() {
         let mut e = Memory::new("test");
         e.namespace = Some("bob".into());
-        let s = Scope {
-            namespace: Some("alice".into()),
-        };
-        assert!(!scope_matches(&e, &s));
+        assert!(!namespace_matches(&e, Some("alice")));
     }
 
     #[test]
@@ -679,11 +665,8 @@ mod tests {
     }
 
     #[test]
-    fn scope_with_underscore_no_escape() {
-        let s = Scope {
-            namespace: Some("user_a".into()),
-        };
-        let clause = scope_to_where_clause(&s).unwrap();
+    fn namespace_with_underscore_no_escape() {
+        let clause = namespace_clause(Some("user_a")).unwrap();
         assert_eq!(clause, "namespace = 'user_a'");
     }
 }

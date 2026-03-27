@@ -60,11 +60,10 @@
 //!
 //! | Entry point | Purpose |
 //! |---|---|
-//! | [`MemeBuilder`] | Fluent builder — configure API key, model, storage path, scoping |
+//! | [`MemeBuilder`] | Fluent builder — configure API key, model, storage path |
 //! | [`Meme`] | Runtime facade — `add`, `flush`, `put`, `search`, `ask`, CRUD, `consolidate` |
 //! | [`Memory`] | A single self-contained unit of knowledge |
 //! | [`Dialogue`] | Speaker + content input for conversation ingestion |
-//! | [`Scope`] | Namespace-based memory isolation filter |
 //! | [`Event`] / [`EventType`] | Change-history audit records |
 //! | [`ConsolidationStats`](store::ConsolidationStats) | Summary returned by [`Meme::consolidate`] |
 //!
@@ -74,7 +73,7 @@
 //! |---|---|---|
 //! | [`config`] | **pub** | Pure data configuration structs with validation |
 //! | [`error`] | **pub** | [`Error`](error::Error) enum and [`Result`](error::Result) alias |
-//! | [`model`] | **pub** | Domain types ([`Memory`], [`Dialogue`], [`Event`], [`Scope`], …) |
+//! | [`model`] | **pub** | Domain types ([`Memory`], [`Dialogue`], [`Event`], …) |
 //! | [`store`] | **pub** | LanceDB vector store, SQLite history store, consolidation |
 //! | `embedding` | pub(crate) | API and optional ONNX embedding providers |
 //! | `llm` | pub(crate) | OpenAI-compatible LLM client, prompts, JSON schemas |
@@ -96,4 +95,4 @@ pub mod store;
 
 pub use builder::MemeBuilder;
 pub use meme::Meme;
-pub use model::{Dialogue, Event, EventType, Memory, Scope};
+pub use model::{Dialogue, Event, EventType, Memory};

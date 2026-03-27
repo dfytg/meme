@@ -13,7 +13,7 @@ use crate::llm::{
     ChatOptions, CompletenessResponse, LlmClient, Message, MissingQueriesResponse, QueryPlan,
     prompt,
 };
-use crate::model::{Memory, MetadataFilter, Scope};
+use crate::model::{Memory, MetadataFilter};
 use crate::store::VectorStore;
 
 /// Hybrid retriever that combines semantic, lexical, and symbolic search
@@ -22,22 +22,15 @@ pub struct HybridRetriever {
     llm: Arc<LlmClient>,
     store: Arc<VectorStore>,
     embedder: Arc<Embedder>,
-    scope: Scope,
-    semantic_top_k: usize,
-    keyword_top_k: usize,
-    structured_top_k: usize,
-    enable_planning: bool,
-    enable_reflection: bool,
-    max_reflection_rounds: usize,
-    max_retrieval_workers: usize,
+    config: PipelineConfig,
+    namespace: Option<String>,
 }
 
 impl std::fmt::Debug for HybridRetriever {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HybridRetriever")
-            .field("semantic_top_k", &self.semantic_top_k)
-            .field("enable_planning", &self.enable_planning)
-            .field("enable_reflection", &self.enable_reflection)
+            .field("semantic_top_k", &self.config.semantic_top_k)
+            .field("enable_planning", &self.config.enable_planning)
             .finish()
     }
 }
@@ -45,26 +38,20 @@ impl std::fmt::Debug for HybridRetriever {
 impl HybridRetriever {
     /// Create a new hybrid retriever.
     #[must_use]
-    pub const fn new(
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn new(
         llm: Arc<LlmClient>,
         store: Arc<VectorStore>,
         embedder: Arc<Embedder>,
-        pipeline_cfg: &PipelineConfig,
-        max_retrieval_workers: usize,
-        scope: Scope,
+        config: PipelineConfig,
+        namespace: Option<String>,
     ) -> Self {
         Self {
             llm,
             store,
             embedder,
-            scope,
-            semantic_top_k: pipeline_cfg.semantic_top_k,
-            keyword_top_k: pipeline_cfg.keyword_top_k,
-            structured_top_k: pipeline_cfg.structured_top_k,
-            enable_planning: pipeline_cfg.enable_planning,
-            enable_reflection: pipeline_cfg.enable_reflection,
-            max_reflection_rounds: pipeline_cfg.max_reflection_rounds,
-            max_retrieval_workers,
+            config,
+            namespace,
         }
     }
 
@@ -75,7 +62,7 @@ impl HybridRetriever {
     /// Returns an error if any retrieval step fails.
     #[tracing::instrument(skip(self))]
     pub async fn retrieve(&self, query: &str) -> Result<Vec<Memory>> {
-        if self.enable_planning {
+        if self.config.enable_planning {
             self.retrieve_with_planning(query).await
         } else {
             self.semantic_search(query).await
@@ -106,7 +93,7 @@ impl HybridRetriever {
         let mut merged = deduplicate(all_results);
         tracing::info!(count = merged.len(), "unique results after merge");
 
-        if self.enable_reflection {
+        if self.config.enable_reflection {
             merged = self.reflect(query, merged, &plan).await?;
         }
 
@@ -116,7 +103,7 @@ impl HybridRetriever {
     async fn semantic_search(&self, query: &str) -> Result<Vec<Memory>> {
         let query_vec = self.embedder.encode_query(query).await?;
         self.store
-            .semantic_search(&query_vec, self.semantic_top_k, &self.scope)
+            .semantic_search(&query_vec, self.config.semantic_top_k, self.ns())
             .await
     }
 
@@ -127,7 +114,7 @@ impl HybridRetriever {
             plan.keywords.clone()
         };
         self.store
-            .keyword_search(&keywords, self.keyword_top_k, &self.scope)
+            .keyword_search(&keywords, self.config.keyword_top_k, self.ns())
             .await
     }
 
@@ -149,8 +136,12 @@ impl HybridRetriever {
             return Ok(Vec::new());
         }
         self.store
-            .structured_search(&filter, self.structured_top_k, &self.scope)
+            .structured_search(&filter, self.config.structured_top_k, self.ns())
             .await
+    }
+
+    fn ns(&self) -> Option<&str> {
+        self.namespace.as_deref()
     }
 
     async fn execute_semantic_searches(&self, queries: &[String]) -> Result<Vec<Memory>> {
@@ -159,19 +150,23 @@ impl HybridRetriever {
         }
 
         let mut handles = Vec::new();
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_retrieval_workers));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            self.config.max_retrieval_workers,
+        ));
 
         for query in queries {
             let embedder = Arc::clone(&self.embedder);
             let store = Arc::clone(&self.store);
-            let top_k = self.semantic_top_k;
+            let top_k = self.config.semantic_top_k;
             let q = query.clone();
             let sem = Arc::clone(&semaphore);
-            let scope = self.scope.clone();
+            let ns = self.namespace.clone();
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await;
                 let query_vec = embedder.encode_query(&q).await?;
-                store.semantic_search(&query_vec, top_k, &scope).await
+                store
+                    .semantic_search(&query_vec, top_k, ns.as_deref())
+                    .await
             }));
         }
 
@@ -225,7 +220,7 @@ impl HybridRetriever {
         let mut current = initial_results;
         let required_info = plan.required_info.join(", ");
 
-        for round in 0..self.max_reflection_rounds {
+        for round in 0..self.config.max_reflection_rounds {
             if current.is_empty() {
                 tracing::info!(round = round + 1, "no results, stopping reflection");
                 break;

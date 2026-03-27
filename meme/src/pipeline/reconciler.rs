@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::error::Result;
 use crate::llm::{self, ChatOptions, LlmClient, Message, ReconcileResponse};
-use crate::model::{Memory, Scope};
+use crate::model::Memory;
 use crate::store::VectorStore;
 
 /// Reconcile new entries against existing memories using the LLM.
@@ -24,7 +24,7 @@ use crate::store::VectorStore;
 pub async fn reconcile(
     llm: &LlmClient,
     store: &VectorStore,
-    scope: &Scope,
+    namespace: Option<&str>,
     entries: &[Memory],
     vectors: &[Vec<f32>],
 ) -> Result<(Vec<Memory>, Vec<Vec<f32>>, Vec<(Uuid, String)>)> {
@@ -34,7 +34,7 @@ pub async fn reconcile(
 
     let ann_futures: Vec<_> = vectors
         .iter()
-        .map(|vec_i| store.semantic_search(vec_i, similarity_top_k, scope))
+        .map(|vec_i| store.semantic_search(vec_i, similarity_top_k, namespace))
         .collect();
     let all_existing: Vec<Vec<Memory>> = future::try_join_all(ann_futures).await?;
 
