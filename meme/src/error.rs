@@ -45,13 +45,8 @@ pub enum Error {
     Config(String),
 
     /// Input validation error.
-    #[error("validation error: {message}")]
-    Validation {
-        /// Description of the validation failure.
-        message: String,
-        /// The field that failed validation, if applicable.
-        field: Option<String>,
-    },
+    #[error("validation error: {0}")]
+    Validation(String),
 
     /// I/O error.
     #[error("io error: {0}")]
@@ -64,10 +59,6 @@ pub enum Error {
     /// Serialization/deserialization error.
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
-
-    /// TOML deserialization error.
-    #[error("toml error: {0}")]
-    Toml(#[from] toml::de::Error),
 
     /// Generic internal error.
     #[error("{0}")]
@@ -96,10 +87,7 @@ impl Error {
 
     /// Create a validation error.
     pub fn validation(message: impl Into<String>) -> Self {
-        Self::Validation {
-            message: message.into(),
-            field: None,
-        }
+        Self::Validation(message.into())
     }
 
     /// Create a vector store error from an Arrow error.

@@ -64,15 +64,15 @@
 //! | [`Meme`] | Runtime facade — `add`, `flush`, `put`, `search`, `ask`, CRUD, `consolidate` |
 //! | [`Memory`] | A single self-contained unit of knowledge |
 //! | [`Dialogue`] | Speaker + content input for conversation ingestion |
-//! | [`Scope`] | Multi-tenant / multi-session isolation filter |
+//! | [`Scope`] | Namespace-based memory isolation filter |
 //! | [`Event`] / [`EventType`] | Change-history audit records |
-//! | [`ConsolidationStats`] | Summary returned by [`Meme::consolidate`] |
+//! | [`ConsolidationStats`](store::ConsolidationStats) | Summary returned by [`Meme::consolidate`] |
 //!
 //! ## Crate Layout
 //!
 //! | Module | Visibility | Contents |
 //! |---|---|---|
-//! | [`config`] | **pub** | TOML + env-var configuration system |
+//! | [`config`] | **pub** | Pure data configuration structs with validation |
 //! | [`error`] | **pub** | [`Error`](error::Error) enum and [`Result`](error::Result) alias |
 //! | [`model`] | **pub** | Domain types ([`Memory`], [`Dialogue`], [`Event`], [`Scope`], …) |
 //! | [`store`] | **pub** | LanceDB vector store, SQLite history store, consolidation |
@@ -97,4 +97,3 @@ pub mod store;
 pub use builder::MemeBuilder;
 pub use meme::Meme;
 pub use model::{Dialogue, Event, EventType, Memory, Scope};
-pub use store::ConsolidationStats;

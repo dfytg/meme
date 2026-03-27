@@ -13,6 +13,14 @@ pub struct Scope {
 }
 
 impl Scope {
+    /// Create a scoped namespace.
+    #[must_use]
+    pub fn new(namespace: impl Into<String>) -> Self {
+        Self {
+            namespace: Some(namespace.into()),
+        }
+    }
+
     /// Returns `true` if no namespace is set.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
