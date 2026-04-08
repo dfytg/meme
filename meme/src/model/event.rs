@@ -19,7 +19,7 @@ pub enum EventType {
 impl EventType {
     /// String representation for storage and display.
     #[must_use]
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Add => "add",
             Self::Update => "update",

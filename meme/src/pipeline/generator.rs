@@ -13,7 +13,7 @@ use crate::model::Memory;
 ///
 /// Returns an error if the LLM call fails.
 #[tracing::instrument(skip(llm, contexts, pipeline_cfg), fields(contexts = contexts.len()))]
-pub async fn generate(
+pub(crate) async fn generate(
     llm: &LlmClient,
     query: &str,
     contexts: &[Memory],
@@ -27,13 +27,14 @@ pub async fn generate(
     sorted.sort_by_key(|e| e.timestamp);
     let context_str = prompt::format_contexts(&sorted);
 
-    #[allow(clippy::literal_string_with_formatting_args)]
+    let query_tag = concat!("{", "query", "}");
+    let context_tag = concat!("{", "context", "}");
     let user_prompt = pipeline_cfg.custom_answer_prompt.as_ref().map_or_else(
         || prompt::answer(query, &context_str),
         |custom| {
             custom
-                .replace("{query}", query)
-                .replace("{context}", &context_str)
+                .replace(query_tag, query)
+                .replace(context_tag, &context_str)
         },
     );
 

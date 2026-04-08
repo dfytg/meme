@@ -5,13 +5,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 
 /// Local embedding provider powered by [`fastembed`].
 ///
 /// Handles model download, tokenization, ONNX inference, pooling, and
 /// L2 normalization automatically.
-pub struct OnnxEmbedding {
+pub(crate) struct OnnxEmbedding {
     model: Arc<Mutex<fastembed::TextEmbedding>>,
     dimension: usize,
 }
@@ -34,12 +34,12 @@ impl OnnxEmbedding {
     /// # Errors
     ///
     /// Returns an error if the model name is unknown or initialization fails.
-    pub fn new(model_name: &str) -> Result<Self> {
+    pub(crate) fn new(model_name: &str) -> Result<Self> {
         let (embedding_model, dimension) = resolve_model(model_name)?;
         let model = fastembed::TextEmbedding::try_new(
             fastembed::InitOptions::new(embedding_model).with_show_download_progress(true),
         )
-        .map_err(|e| Error::Embedding(format!("fastembed init failed: {e}")))?;
+        .map_err(|e| MemeError::Embedding(format!("fastembed init failed: {e}")))?;
 
         Ok(Self {
             model: Arc::new(Mutex::new(model)),
@@ -49,7 +49,7 @@ impl OnnxEmbedding {
 
     /// Returns the embedding dimension.
     #[must_use]
-    pub const fn dimension(&self) -> usize {
+    pub(crate) const fn dimension(&self) -> usize {
         self.dimension
     }
 
@@ -58,7 +58,7 @@ impl OnnxEmbedding {
     /// # Errors
     ///
     /// Returns an error if encoding fails.
-    pub async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+    pub(crate) async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -67,13 +67,13 @@ impl OnnxEmbedding {
         tokio::task::spawn_blocking(move || {
             let mut guard = model
                 .lock()
-                .map_err(|e| Error::Embedding(format!("fastembed lock poisoned: {e}")))?;
+                .map_err(|e| MemeError::Embedding(format!("fastembed lock poisoned: {e}")))?;
             guard
                 .embed(owned, None)
-                .map_err(|e| Error::Embedding(format!("fastembed encode failed: {e}")))
+                .map_err(|e| MemeError::Embedding(format!("fastembed encode failed: {e}")))
         })
         .await
-        .map_err(|e| Error::Embedding(format!("spawn_blocking failed: {e}")))?
+        .map_err(|e| MemeError::Embedding(format!("spawn_blocking failed: {e}")))?
     }
 
     /// Encode a single query text into an embedding vector.
@@ -81,12 +81,12 @@ impl OnnxEmbedding {
     /// # Errors
     ///
     /// Returns an error if encoding fails.
-    pub async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
+    pub(crate) async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
         let results = self.encode_documents(&[text]).await?;
         results
             .into_iter()
             .next()
-            .ok_or_else(|| Error::Embedding("empty fastembed result".to_owned()))
+            .ok_or_else(|| MemeError::Embedding("empty fastembed result".to_owned()))
     }
 }
 
@@ -96,5 +96,5 @@ fn resolve_model(name: &str) -> Result<(fastembed::EmbeddingModel, usize)> {
             return Ok((info.model, info.dim));
         }
     }
-    Err(Error::Config(format!("unknown fastembed model: {name}")))
+    Err(MemeError::Config(format!("unknown fastembed model: {name}")))
 }

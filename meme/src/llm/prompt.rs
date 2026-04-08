@@ -8,7 +8,7 @@ use crate::model::Memory;
 ///
 /// Converts a dialogue window into structured memory entries.
 #[must_use]
-pub fn extraction(dialogue_text: &str, context: &str) -> String {
+pub(crate) fn extraction(dialogue_text: &str, context: &str) -> String {
     format!(
         r#"Your task is to extract all valuable information from the following dialogues and convert them into structured memory entries.
 
@@ -57,7 +57,7 @@ Now process the above dialogues. Return ONLY the JSON object, no other explanati
 ///
 /// Used by `update()` to keep metadata in sync after content changes.
 #[must_use]
-pub fn re_extract(text: &str) -> String {
+pub(crate) fn re_extract(text: &str) -> String {
     format!(
         r#"Extract structured metadata from the following memory text.
 
@@ -81,14 +81,14 @@ Return ONLY the JSON object."#
 
 /// Build the previous-window context string for extraction.
 #[must_use]
-pub fn extraction_context(previous_entries: &[Memory]) -> String {
+pub(crate) fn extraction_context(previous_entries: &[Memory]) -> String {
     if previous_entries.is_empty() {
         return String::new();
     }
     let mut ctx =
         "\n[Previous Window Memory Entries (for reference to avoid duplication)]\n".to_owned();
     for entry in previous_entries.iter().take(3) {
-        let _ = writeln!(ctx, "- {}", entry.content);
+        writeln!(ctx, "- {}", entry.content).ok();
     }
     ctx
 }
@@ -96,7 +96,7 @@ pub fn extraction_context(previous_entries: &[Memory]) -> String {
 /// Build the unified query plan prompt — combines query analysis and
 /// information requirements into a single LLM call.
 #[must_use]
-pub fn query_plan(query: &str) -> String {
+pub(crate) fn query_plan(query: &str) -> String {
     format!(
         r#"Analyze the following question. Extract structured search metadata AND determine what information is needed to answer it.
 
@@ -127,7 +127,7 @@ Return ONLY the JSON, no other text."#
 
 /// Build the information completeness analysis prompt (reflection).
 #[must_use]
-pub fn completeness_check(query: &str, context_str: &str, required_info_json: &str) -> String {
+pub(crate) fn completeness_check(query: &str, context_str: &str, required_info_json: &str) -> String {
     format!(
         r#"Analyze whether the provided information is sufficient to completely answer the original question, based on the identified information requirements.
 
@@ -159,7 +159,7 @@ Return ONLY the JSON, no other text."#
 
 /// Build the missing-info query generation prompt (reflection additional queries).
 #[must_use]
-pub fn missing_info_queries(query: &str, context_str: &str, required_info_json: &str) -> String {
+pub(crate) fn missing_info_queries(query: &str, context_str: &str, required_info_json: &str) -> String {
     format!(
         r#"Based on the original question, required information types, and currently available information, generate targeted search queries to find the missing information.
 
@@ -189,7 +189,7 @@ Return ONLY the JSON, no other text."#
 
 /// Build the answer generation prompt.
 #[must_use]
-pub fn answer(query: &str, context_str: &str) -> String {
+pub(crate) fn answer(query: &str, context_str: &str) -> String {
     format!(
         r#"Answer the user's question based on the provided context.
 
@@ -222,14 +222,14 @@ Now answer the question. Return ONLY the JSON, no other text."#
 /// Given new extracted facts and existing similar memories, the LLM determines
 /// the correct lifecycle action (ADD / UPDATE / DELETE / NOOP) for each new fact.
 #[must_use]
-pub fn reconcile(new_facts: &[&str], existing_memories: &[(usize, &str)]) -> String {
+pub(crate) fn reconcile(new_facts: &[&str], existing_memories: &[(usize, &str)]) -> String {
     let mut new_block = String::new();
     for (i, fact) in new_facts.iter().enumerate() {
-        let _ = writeln!(new_block, "[New {i}] {fact}");
+        writeln!(new_block, "[New {i}] {fact}").ok();
     }
     let mut existing_block = String::new();
     for (idx, text) in existing_memories {
-        let _ = writeln!(existing_block, "[Existing {idx}] {text}");
+        writeln!(existing_block, "[Existing {idx}] {text}").ok();
     }
     format!(
         r#"You are a smart memory manager. Compare newly extracted facts with existing memories and decide the correct action for each new fact.
@@ -265,7 +265,7 @@ Return ONLY the JSON object."#
 
 /// Format memory entries as context string for answer generation.
 #[must_use]
-pub fn format_contexts(entries: &[&Memory]) -> String {
+pub(crate) fn format_contexts(entries: &[&Memory]) -> String {
     entries
         .iter()
         .enumerate()
@@ -297,14 +297,14 @@ fn format_single_context(i: usize, e: &Memory) -> String {
 
 /// Format entries compactly for reflection/completeness checks.
 #[must_use]
-pub fn format_contexts_compact(entries: &[Memory]) -> String {
+pub(crate) fn format_contexts_compact(entries: &[Memory]) -> String {
     entries
         .iter()
         .enumerate()
         .map(|(i, e)| {
             let mut line = format!("[Info {}] {}", i + 1, e.content);
             if let Some(ts) = e.timestamp {
-                let _ = write!(line, " | Time: {}", ts.format("%+"));
+                write!(line, " | Time: {}", ts.format("%+")).ok();
             }
             line
         })

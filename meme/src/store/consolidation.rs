@@ -67,26 +67,11 @@ pub async fn consolidate(
     let (entries, vectors): (Vec<Memory>, Vec<Vec<f32>>) = pairs.into_iter().unzip();
     let n = entries.len();
 
-    let now = chrono::Utc::now();
-    let max_age_secs = f64::from(params.max_age_days) * 86400.0;
     let mut importance: Vec<f64> = vec![1.0; n];
     let mut dead = HashSet::new();
-
-    let mut decayed = 0usize;
-    for (i, entry) in entries.iter().enumerate() {
-        let Some(ts) = entry.timestamp else { continue };
-        let age = (now - ts).num_seconds() as f64;
-        if age > max_age_secs {
-            importance[i] *= params.decay_factor;
-            if importance[i] < params.min_importance {
-                dead.insert(i);
-            }
-            decayed += 1;
-        }
-    }
+    let decayed = apply_decay(&entries, params, &mut importance, &mut dead);
 
     let merge_k = 5;
-    let mut merged = 0usize;
     let mut ids_to_delete: Vec<uuid::Uuid> = Vec::new();
 
     let id_to_idx: HashMap<uuid::Uuid, usize> =
@@ -101,7 +86,7 @@ pub async fn consolidate(
         async move {
             let _permit = sem.acquire().await;
             store
-                .semantic_search(&vectors_ref[i], merge_k, namespace)
+                .semantic_search(vectors_ref.get(i).unwrap_or(&Vec::new()), merge_k, namespace)
                 .await
                 .map(|neighbors| (i, neighbors))
         }
@@ -109,34 +94,20 @@ pub async fn consolidate(
     let all_neighbors: Vec<(usize, Vec<Memory>)> =
         futures::future::try_join_all(ann_futures).await?;
 
-    for (i, neighbors) in all_neighbors {
-        if dead.contains(&i) {
-            continue;
-        }
-        for neighbor in &neighbors {
-            if neighbor.id == entries[i].id {
-                continue;
-            }
-            let Some(&j) = id_to_idx.get(&neighbor.id) else {
-                continue;
-            };
-            if dead.contains(&j) {
-                continue;
-            }
-            let sim = cosine_similarity(&vectors[i], &vectors[j]);
-            if sim >= params.merge_threshold {
-                let loser = if importance[i] >= importance[j] { j } else { i };
-                if dead.insert(loser) {
-                    ids_to_delete.push(entries[loser].id);
-                    merged += 1;
-                }
-            }
-        }
-    }
+    let (merge_deletes, merged) = merge_similar(
+        &all_neighbors,
+        &entries,
+        &vectors,
+        &id_to_idx,
+        &importance,
+        params.merge_threshold,
+        &mut dead,
+    );
+    ids_to_delete.extend(merge_deletes);
 
     let mut pruned = 0usize;
     for (i, entry) in entries.iter().enumerate() {
-        if !dead.contains(&i) && importance[i] < params.min_importance {
+        if !dead.contains(&i) && importance.get(i).copied().unwrap_or(0.0) < params.min_importance {
             ids_to_delete.push(entry.id);
             pruned += 1;
         }
@@ -157,14 +128,85 @@ pub async fn consolidate(
     Ok(stats)
 }
 
+fn apply_decay(
+    entries: &[Memory],
+    params: &ConsolidationParams,
+    importance: &mut [f64],
+    dead: &mut HashSet<usize>,
+) -> usize {
+    let now = chrono::Utc::now();
+    let max_age_secs = f64::from(params.max_age_days) * 86400.0;
+    let mut decayed = 0usize;
+    for (i, entry) in entries.iter().enumerate() {
+        let Some(ts) = entry.timestamp else { continue };
+        let age = (now - ts).num_seconds() as f64;
+        if age > max_age_secs {
+            if let Some(imp) = importance.get_mut(i) {
+                *imp *= params.decay_factor;
+            }
+            if importance.get(i).copied().unwrap_or(0.0) < params.min_importance {
+                dead.insert(i);
+            }
+            decayed += 1;
+        }
+    }
+    decayed
+}
+
+fn merge_similar(
+    all_neighbors: &[(usize, Vec<Memory>)],
+    entries: &[Memory],
+    vectors: &[Vec<f32>],
+    id_to_idx: &HashMap<uuid::Uuid, usize>,
+    importance: &[f64],
+    threshold: f64,
+    dead: &mut HashSet<usize>,
+) -> (Vec<uuid::Uuid>, usize) {
+    let mut ids_to_delete = Vec::new();
+    let mut merged = 0usize;
+    for (i, neighbors) in all_neighbors {
+        if dead.contains(i) {
+            continue;
+        }
+        for neighbor in neighbors {
+            let Some(entry_i) = entries.get(*i) else { continue };
+            if neighbor.id == entry_i.id {
+                continue;
+            }
+            let Some(&j) = id_to_idx.get(&neighbor.id) else { continue };
+            if dead.contains(&j) {
+                continue;
+            }
+            let (Some(vi), Some(vj)) = (vectors.get(*i), vectors.get(j)) else { continue };
+            let sim = cosine_similarity(vi, vj);
+            if sim < threshold {
+                continue;
+            }
+            let (imp_i, imp_j) = (
+                importance.get(*i).copied().unwrap_or(0.0),
+                importance.get(j).copied().unwrap_or(0.0),
+            );
+            let loser = if imp_i >= imp_j { j } else { *i };
+            if !dead.insert(loser) {
+                continue;
+            }
+            if let Some(e) = entries.get(loser) {
+                ids_to_delete.push(e.id);
+            }
+            merged += 1;
+        }
+    }
+    (ids_to_delete, merged)
+}
+
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     let dot: f64 = a
         .iter()
         .zip(b)
         .map(|(x, y)| f64::from(*x) * f64::from(*y))
         .sum();
-    let mag_a: f64 = a.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
-    let mag_b: f64 = b.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
+    let mag_a = a.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
+    let mag_b = b.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
     if mag_a == 0.0 || mag_b == 0.0 {
         0.0
     } else {

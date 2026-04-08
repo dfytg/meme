@@ -5,7 +5,7 @@ mod embedder;
 #[cfg(feature = "onnx")]
 mod onnx;
 
-pub use api::ApiEmbedding;
-pub use embedder::Embedder;
+pub(crate) use api::ApiEmbedding;
+pub(crate) use embedder::Embedder;
 #[cfg(feature = "onnx")]
-pub use onnx::OnnxEmbedding;
+pub(crate) use onnx::OnnxEmbedding;

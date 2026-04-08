@@ -1,11 +1,11 @@
 //! Unified error types for the meme library.
 
-/// Result type alias using [`Error`].
-pub type Result<T> = std::result::Result<T, Error>;
+/// Result type alias using [`MemeError`].
+pub type Result<T> = std::result::Result<T, MemeError>;
 
 /// Top-level error type for the meme library.
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum MemeError {
     /// LLM API call failed.
     #[error("llm error: {message}")]
     Llm {
@@ -65,7 +65,7 @@ pub enum Error {
     Internal(String),
 }
 
-impl Error {
+impl MemeError {
     /// Create an LLM error from a status code and message.
     pub fn llm(message: impl Into<String>) -> Self {
         Self::Llm {
@@ -106,13 +106,13 @@ impl Error {
     }
 }
 
-impl From<lancedb::Error> for Error {
+impl From<lancedb::Error> for MemeError {
     fn from(e: lancedb::Error) -> Self {
         Self::VectorStore(e.to_string())
     }
 }
 
-impl From<rusqlite::Error> for Error {
+impl From<rusqlite::Error> for MemeError {
     fn from(e: rusqlite::Error) -> Self {
         Self::History(e.to_string())
     }

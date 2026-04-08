@@ -10,7 +10,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 use crate::model::{Event, EventType};
 
 /// Persistent store for memory lifecycle events backed by `SQLite`.
@@ -84,8 +84,8 @@ impl HistoryStore {
         let e = event.clone();
         let ns = namespace.map(String::from);
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let conn = conn.lock().map_err(|e| Error::Internal(format!("mutex poisoned: {e}")))?;
-            conn.execute(
+            let guard = conn.lock().map_err(|err| MemeError::Internal(format!("mutex poisoned: {err}")))?;
+            guard.execute(
                 "INSERT INTO events (event_id, memory_id, event_type, old_content, new_content, namespace, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![
@@ -98,10 +98,11 @@ impl HistoryStore {
                     e.timestamp.to_rfc3339(),
                 ],
             )?;
+            drop(guard);
             Ok(())
         })
         .await
-        .map_err(|e| Error::Internal(format!("spawn_blocking: {e}")))??;
+        .map_err(|e| MemeError::Internal(format!("spawn_blocking: {e}")))??;
 
         Ok(event)
     }
@@ -121,32 +122,43 @@ impl HistoryStore {
         let mid = memory_id.to_string();
         let ns = namespace.map(String::from);
         tokio::task::spawn_blocking(move || {
-            let conn = conn
+            let guard = conn
                 .lock()
-                .map_err(|e| Error::Internal(format!("mutex poisoned: {e}")))?;
-            let mut stmt = conn.prepare(
-                "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
-                 FROM events
-                 WHERE memory_id = ?1
-                   AND (namespace IS ?2)
-                 ORDER BY created_at ASC",
-            )?;
-            let rows = stmt.query_map(rusqlite::params![mid, ns], |row| {
-                Ok(RawEvent {
-                    event_id: row.get(0)?,
-                    memory_id: row.get(1)?,
-                    event_type: row.get(2)?,
-                    old_content: row.get(3)?,
-                    new_content: row.get(4)?,
-                    created_at: row.get(5)?,
-                })
-            })?;
-            rows.map(|r| r?.try_into_event())
+                .map_err(|err| MemeError::Internal(format!("mutex poisoned: {err}")))?;
+            let raw = fetch_raw_events(&guard, &mid, ns.as_deref())?;
+            drop(guard);
+            raw.into_iter()
+                .map(RawEvent::try_into_event)
                 .collect::<Result<Vec<_>>>()
         })
         .await
-        .map_err(|e| Error::Internal(format!("spawn_blocking: {e}")))?
+        .map_err(|e| MemeError::Internal(format!("spawn_blocking: {e}")))?
     }
+}
+
+fn fetch_raw_events(
+    conn: &Connection,
+    mid: &str,
+    ns: Option<&str>,
+) -> Result<Vec<RawEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
+         FROM events
+         WHERE memory_id = ?1
+           AND (namespace IS ?2)
+         ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![mid, ns], |row| {
+        Ok(RawEvent {
+            event_id: row.get(0)?,
+            memory_id: row.get(1)?,
+            event_type: row.get(2)?,
+            old_content: row.get(3)?,
+            new_content: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<_, _>>()?)
 }
 
 /// Intermediate row type for `SQLite` → `Event` conversion.
@@ -163,20 +175,20 @@ impl RawEvent {
     fn try_into_event(self) -> Result<Event> {
         Ok(Event {
             id: Uuid::parse_str(&self.event_id).map_err(|e| {
-                Error::History(format!("corrupt event_id '{}': {e}", self.event_id))
+                MemeError::History(format!("corrupt event_id '{}': {e}", self.event_id))
             })?,
             memory_id: Uuid::parse_str(&self.memory_id).map_err(|e| {
-                Error::History(format!("corrupt memory_id '{}': {e}", self.memory_id))
+                MemeError::History(format!("corrupt memory_id '{}': {e}", self.memory_id))
             })?,
             event_type: self.event_type.parse().map_err(|e| {
-                Error::History(format!("corrupt event_type '{}': {e}", self.event_type))
+                MemeError::History(format!("corrupt event_type '{}': {e}", self.event_type))
             })?,
             old_content: self.old_content,
             new_content: self.new_content,
             timestamp: chrono::DateTime::parse_from_rfc3339(&self.created_at)
                 .map(|dt| dt.with_timezone(&Utc))
                 .map_err(|e| {
-                    Error::History(format!("corrupt created_at '{}': {e}", self.created_at))
+                    MemeError::History(format!("corrupt created_at '{}': {e}", self.created_at))
                 })?,
         })
     }

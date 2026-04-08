@@ -10,7 +10,7 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures::TryStreamExt;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 use crate::model::{Memory, MetadataFilter};
 
 /// `LanceDB`-backed vector store with multi-view indexing.
@@ -58,7 +58,7 @@ impl VectorStore {
             let table = self.get_table().await?;
             self.rebuild_fts_index(&table).await;
         } else {
-            let schema = self.build_schema();
+            let schema = self.build_schema()?;
             self.db
                 .create_empty_table(&self.table_name, schema)
                 .execute()
@@ -68,8 +68,10 @@ impl VectorStore {
         Ok(())
     }
 
-    fn build_schema(&self) -> SchemaRef {
-        Arc::new(Schema::new(vec![
+    fn build_schema(&self) -> Result<SchemaRef> {
+        let dim = i32::try_from(self.dimension)
+            .map_err(|_| MemeError::Config(format!("dimension {} overflows i32", self.dimension)))?;
+        Ok(Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("content", DataType::Utf8, false),
             Field::new("keywords", DataType::Utf8, false),
@@ -85,14 +87,11 @@ impl VectorStore {
                 "vector",
                 DataType::FixedSizeList(
                     Arc::new(Field::new("item", DataType::Float32, true)),
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-                    {
-                        self.dimension as i32
-                    },
+                    dim,
                 ),
                 false,
             ),
-        ]))
+        ])))
     }
 
     async fn get_table(&self) -> Result<lancedb::Table> {
@@ -206,7 +205,7 @@ impl VectorStore {
             return Ok(());
         }
         if entries.len() != vectors.len() {
-            return Err(Error::VectorStore(format!(
+            return Err(MemeError::VectorStore(format!(
                 "entries/vectors length mismatch: {} vs {}",
                 entries.len(),
                 vectors.len()
@@ -214,7 +213,7 @@ impl VectorStore {
         }
         for (i, v) in vectors.iter().enumerate() {
             if v.len() != self.dimension {
-                return Err(Error::VectorStore(format!(
+                return Err(MemeError::VectorStore(format!(
                     "vector[{i}] dimension mismatch: expected {}, got {}",
                     self.dimension,
                     v.len()
@@ -223,7 +222,7 @@ impl VectorStore {
         }
 
         let n = entries.len();
-        let schema = self.build_schema();
+        let schema = self.build_schema()?;
         let col = |f: fn(&Memory) -> String| -> ArrayRef {
             Arc::new(StringArray::from(entries.iter().map(f).collect::<Vec<_>>()))
         };
@@ -243,7 +242,7 @@ impl VectorStore {
             build_vector_column(vectors, self.dimension)?,
         ];
 
-        let batch = RecordBatch::try_new(Arc::clone(&schema), columns).map_err(Error::arrow)?;
+        let batch = RecordBatch::try_new(Arc::clone(&schema), columns).map_err(MemeError::arrow)?;
         let reader: Box<dyn arrow_array::RecordBatchReader + Send> =
             Box::new(RecordBatchIterator::new(vec![Ok(batch)], schema));
         let table = self.get_table().await?;
@@ -545,9 +544,10 @@ fn build_vector_column(vectors: &[Vec<f32>], dimension: usize) -> Result<ArrayRe
     let flat: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
     let values = Float32Array::from(flat);
     let field = Arc::new(Field::new("item", DataType::Float32, true));
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    let array = FixedSizeListArray::try_new(field, dimension as i32, Arc::new(values), None)
-        .map_err(Error::arrow)?;
+    let dim = i32::try_from(dimension)
+        .map_err(|_| MemeError::Config(format!("dimension {dimension} overflows i32")))?;
+    let array = FixedSizeListArray::try_new(field, dim, Arc::new(values), None)
+        .map_err(MemeError::arrow)?;
     Ok(Arc::new(array))
 }
 
@@ -589,7 +589,7 @@ fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
         let start = i * dimension;
         let end = start + dimension;
         if end <= float_values.len() {
-            vectors.push(float_values.values()[start..end].to_vec());
+            vectors.push(float_values.values().get(start..end).unwrap_or_default().to_vec());
         } else {
             vectors.push(Vec::new());
         }

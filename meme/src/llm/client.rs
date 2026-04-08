@@ -5,13 +5,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::config::LlmConfig;
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 use crate::llm::json::extract_json_from_text;
 
 /// Chat message role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Role {
+pub(crate) enum Role {
     /// System prompt.
     System,
     /// User message.
@@ -22,7 +22,7 @@ pub enum Role {
 
 /// A single chat message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
+pub(crate) struct Message {
     /// Role of the message sender.
     pub role: Role,
     /// Message content.
@@ -32,7 +32,7 @@ pub struct Message {
 impl Message {
     /// Create a system message.
     #[must_use]
-    pub fn system(content: impl Into<String>) -> Self {
+    pub(crate) fn system(content: impl Into<String>) -> Self {
         Self {
             role: Role::System,
             content: content.into(),
@@ -41,7 +41,7 @@ impl Message {
 
     /// Create a user message.
     #[must_use]
-    pub fn user(content: impl Into<String>) -> Self {
+    pub(crate) fn user(content: impl Into<String>) -> Self {
         Self {
             role: Role::User,
             content: content.into(),
@@ -51,7 +51,7 @@ impl Message {
 
 /// Options for a chat completion request.
 #[derive(Debug, Clone, Copy)]
-pub struct ChatOptions {
+pub(crate) struct ChatOptions {
     /// Temperature for generation.
     pub temperature: f32,
     /// Whether to request JSON output format.
@@ -69,7 +69,7 @@ impl Default for ChatOptions {
 
 /// OpenAI-compatible HTTP LLM client.
 #[derive(Debug, Clone)]
-pub struct LlmClient {
+pub(crate) struct LlmClient {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
@@ -83,11 +83,11 @@ impl LlmClient {
     /// # Errors
     ///
     /// Returns an error if the API key is missing.
-    pub fn new(http: reqwest::Client, config: &LlmConfig) -> Result<Self> {
+    pub(crate) fn new(http: reqwest::Client, config: &LlmConfig) -> Result<Self> {
         let api_key = config
             .api_key
             .clone()
-            .ok_or_else(|| Error::Config("LLM API key is required".to_owned()))?;
+            .ok_or_else(|| MemeError::Config("LLM API key is required".to_owned()))?;
 
         Ok(Self {
             http,
@@ -108,7 +108,7 @@ impl LlmClient {
     /// Returns an error if the API call fails after retries or the response
     /// cannot be deserialized into `T`.
     #[tracing::instrument(skip(self, messages, opts), fields(model = %self.model))]
-    pub async fn chat_structured<T: serde::de::DeserializeOwned>(
+    pub(crate) async fn chat_structured<T: serde::de::DeserializeOwned>(
         &self,
         messages: &[Message],
         opts: &ChatOptions,
@@ -125,7 +125,7 @@ impl LlmClient {
                         {
                             return Ok(parsed);
                         }
-                        last_err = Some(Error::JsonParse(format!("{e}")));
+                        last_err = Some(MemeError::JsonParse(format!("{e}")));
                     }
                 },
                 Err(e) => {
@@ -141,7 +141,7 @@ impl LlmClient {
                 tokio::time::sleep(Duration::from_secs(wait)).await;
             }
         }
-        Err(last_err.unwrap_or_else(|| Error::llm("all retries exhausted")))
+        Err(last_err.unwrap_or_else(|| MemeError::llm("all retries exhausted")))
     }
 
     async fn call_api(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
@@ -154,8 +154,11 @@ impl LlmClient {
             "stream": false,
         });
 
-        if opts.json_mode {
-            body["response_format"] = serde_json::json!({"type": "json_object"});
+        if opts.json_mode && let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "response_format".to_owned(),
+                serde_json::json!({"type": "json_object"}),
+            );
         }
 
         let resp = self
@@ -169,16 +172,19 @@ impl LlmClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(Error::llm_with_status(
+            return Err(MemeError::llm_with_status(
                 status.as_u16(),
                 format!("API returned {status}: {text}"),
             ));
         }
 
         let data: serde_json::Value = resp.json().await?;
-        data["choices"][0]["message"]["content"]
-            .as_str()
+        data.get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(serde_json::Value::as_str)
             .map(String::from)
-            .ok_or_else(|| Error::llm("missing content in API response"))
+            .ok_or_else(|| MemeError::llm("missing content in API response"))
     }
 }

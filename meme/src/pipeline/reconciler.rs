@@ -21,7 +21,7 @@ use crate::store::VectorStore;
 /// # Errors
 ///
 /// Returns an error if ANN search or LLM reconciliation fails.
-pub async fn reconcile(
+pub(crate) async fn reconcile(
     llm: &LlmClient,
     store: &VectorStore,
     namespace: Option<&str>,
@@ -101,8 +101,10 @@ pub async fn reconcile(
                 if let Some(pair) = target {
                     deletes.push(pair);
                 }
-                accepted.push(entries[new_idx].clone());
-                accepted_vecs.push(vectors[new_idx].clone());
+                if let (Some(e), Some(v)) = (entries.get(new_idx), vectors.get(new_idx)) {
+                    accepted.push(e.clone());
+                    accepted_vecs.push(v.clone());
+                }
             }
             "delete" => {
                 if let Some(pair) = target {
@@ -111,8 +113,10 @@ pub async fn reconcile(
             }
             "noop" | "duplicate" => {}
             _ => {
-                accepted.push(entries[new_idx].clone());
-                accepted_vecs.push(vectors[new_idx].clone());
+                if let (Some(e), Some(v)) = (entries.get(new_idx), vectors.get(new_idx)) {
+                    accepted.push(e.clone());
+                    accepted_vecs.push(v.clone());
+                }
             }
         }
     }
@@ -121,7 +125,9 @@ pub async fn reconcile(
     for (i, entry) in entries.iter().enumerate() {
         if !handled.contains(&i) {
             accepted.push(entry.clone());
-            accepted_vecs.push(vectors[i].clone());
+            if let Some(v) = vectors.get(i) {
+                accepted_vecs.push(v.clone());
+            }
         }
     }
 

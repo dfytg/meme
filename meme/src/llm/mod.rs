@@ -2,11 +2,11 @@
 
 mod client;
 mod json;
-pub mod prompt;
+pub(crate) mod prompt;
 mod schema;
 
-pub use client::{ChatOptions, LlmClient, Message};
-pub use schema::{
+pub(crate) use client::{ChatOptions, LlmClient, Message};
+pub(crate) use schema::{
     AnswerResponse, CompletenessResponse, ExtractedEntry, ExtractionResponse,
     MissingQueriesResponse, QueryPlan, ReExtractResponse, ReconcileResponse,
 };

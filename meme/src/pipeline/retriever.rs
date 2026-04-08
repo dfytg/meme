@@ -18,7 +18,7 @@ use crate::store::VectorStore;
 
 /// Hybrid retriever that combines semantic, lexical, and symbolic search
 /// with LLM-driven intent analysis and reflection.
-pub struct HybridRetriever {
+pub(crate) struct HybridRetriever {
     llm: Arc<LlmClient>,
     store: Arc<VectorStore>,
     embedder: Arc<Embedder>,
@@ -33,15 +33,14 @@ impl std::fmt::Debug for HybridRetriever {
         f.debug_struct("HybridRetriever")
             .field("semantic_top_k", &self.config.semantic_top_k)
             .field("enable_planning", &self.config.enable_planning)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl HybridRetriever {
     /// Create a new hybrid retriever.
     #[must_use]
-    #[allow(clippy::missing_const_for_fn)]
-    pub fn new(
+    pub(crate) const fn new(
         llm: Arc<LlmClient>,
         store: Arc<VectorStore>,
         embedder: Arc<Embedder>,
@@ -66,7 +65,7 @@ impl HybridRetriever {
     ///
     /// Returns an error if any retrieval step fails.
     #[tracing::instrument(skip(self))]
-    pub async fn retrieve(&self, query: &str) -> Result<Vec<Memory>> {
+    pub(crate) async fn retrieve(&self, query: &str) -> Result<Vec<Memory>> {
         if self.config.enable_planning {
             self.retrieve_with_planning(query).await
         } else {
@@ -102,7 +101,10 @@ impl HybridRetriever {
             merged = self.reflect(query, merged, &plan).await?;
         }
 
-        merged = self.maybe_rerank(query, merged).await?;
+        #[cfg(feature = "onnx")]
+        {
+            merged = self.maybe_rerank(query, merged).await?;
+        }
 
         Ok(merged)
     }
@@ -308,9 +310,8 @@ impl HybridRetriever {
     }
 
     /// Apply reranker if configured, otherwise pass through unchanged.
-    #[allow(unused_variables, clippy::unused_async)]
+    #[cfg(feature = "onnx")]
     async fn maybe_rerank(&self, query: &str, entries: Vec<Memory>) -> Result<Vec<Memory>> {
-        #[cfg(feature = "onnx")]
         if let Some(reranker) = &self.reranker {
             if entries.is_empty() {
                 return Ok(entries);
@@ -327,6 +328,7 @@ impl HybridRetriever {
         }
         Ok(entries)
     }
+
 }
 
 fn deduplicate(entries: Vec<Memory>) -> Vec<Memory> {
@@ -335,7 +337,9 @@ fn deduplicate(entries: Vec<Memory>) -> Vec<Memory> {
 }
 
 static RE_LAST_N_DAYS: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new(r"last\s+(\d+)\s+days?").expect("valid regex"));
+    std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"last\s+(\d+)\s+days?").unwrap_or_else(|_| unreachable!())
+    });
 
 /// Parse a time expression into a `(start, end)` datetime range.
 ///

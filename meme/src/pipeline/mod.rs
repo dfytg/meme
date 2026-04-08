@@ -5,7 +5,7 @@ mod generator;
 mod reconciler;
 mod retriever;
 
-pub use extractor::Extractor;
-pub use generator::generate;
-pub use reconciler::reconcile;
-pub use retriever::HybridRetriever;
+pub(crate) use extractor::Extractor;
+pub(crate) use generator::generate;
+pub(crate) use reconciler::reconcile;
+pub(crate) use retriever::HybridRetriever;

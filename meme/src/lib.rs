@@ -73,14 +73,13 @@
 //! | Module | Visibility | Contents |
 //! |---|---|---|
 //! | [`config`] | **pub** | Pure data configuration structs with validation |
-//! | [`error`] | **pub** | [`Error`](error::Error) enum and [`Result`](error::Result) alias |
+//! | [`error`] | **pub** | [`MemeError`] enum and [`Result`](error::Result) alias |
 //! | [`model`] | **pub** | Domain types ([`Memory`], [`Dialogue`], [`Event`], …) |
 //! | [`store`] | **pub** | LanceDB vector store, SQLite history store, consolidation |
 //! | `embedding` | pub(crate) | API and optional ONNX embedding providers |
 //! | `llm` | pub(crate) | OpenAI-compatible LLM client, prompts, JSON schemas |
 //! | `pipeline` | pub(crate) | Extractor, reconciler, hybrid retriever, answer generator |
 
-#![allow(clippy::missing_fields_in_debug)]
 
 mod builder;
 pub mod config;
@@ -97,4 +96,5 @@ pub mod store;
 pub use builder::MemeBuilder;
 pub use meme::Meme;
 pub use model::{Dialogue, Event, EventType, Memory};
+pub use error::MemeError;
 pub use store::{ConsolidationParams, ConsolidationStats};

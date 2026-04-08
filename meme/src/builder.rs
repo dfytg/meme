@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::config::{self, Config};
 use crate::embedding::{self, Embedder};
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 use crate::llm::LlmClient;
 use crate::meme::Meme;
 use crate::pipeline::{Extractor, HybridRetriever};
@@ -225,7 +225,7 @@ impl MemeBuilder {
             }
             #[cfg(not(feature = "onnx"))]
             config::EmbeddingProviderKind::Onnx => {
-                return Err(Error::Config(
+                return Err(MemeError::Config(
                     "ONNX provider requires the 'onnx' feature flag".into(),
                 ));
             }
@@ -263,7 +263,7 @@ impl MemeBuilder {
 
         #[cfg(not(feature = "onnx"))]
         if config.pipeline.reranker_model.is_some() {
-            return Err(Error::Config(
+            return Err(MemeError::Config(
                 "reranker requires the 'onnx' feature flag".into(),
             ));
         }
@@ -310,5 +310,5 @@ fn build_http_client() -> Result<reqwest::Client> {
         .pool_max_idle_per_host(DEFAULT_POOL_IDLE_PER_HOST)
         .user_agent(concat!("meme/", env!("CARGO_PKG_VERSION")))
         .build()
-        .map_err(|e| Error::Internal(format!("failed to build HTTP client: {e}")))
+        .map_err(|e| MemeError::Internal(format!("failed to build HTTP client: {e}")))
 }

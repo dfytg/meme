@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::embedding::Embedder;
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 use crate::llm::{self, LlmClient, ReExtractResponse};
 use crate::model::{Dialogue, Event, EventType, Memory};
 use crate::pipeline::{self, Extractor, HybridRetriever};
@@ -39,7 +39,6 @@ impl std::fmt::Debug for Meme {
     }
 }
 
-#[allow(clippy::future_not_send)]
 impl Meme {
     /// Create a builder for configuring a new `Meme` instance.
     #[must_use]
@@ -102,7 +101,7 @@ impl Meme {
     #[tracing::instrument(skip(self))]
     pub async fn put(&self, content: &str) -> Result<()> {
         if content.is_empty() {
-            return Err(Error::validation("content must not be empty"));
+            return Err(MemeError::validation("content must not be empty"));
         }
         let entry = Memory::new(content);
         self.ingest_entries(&[entry]).await
@@ -148,13 +147,13 @@ impl Meme {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NotFound`] if the entry does not exist.
+    /// Returns [`MemeError::NotFound`] if the entry does not exist.
     pub async fn update(&self, id: Uuid, new_content: &str) -> Result<()> {
         let existing = self
             .store
             .get_by_id(id)
             .await?
-            .ok_or_else(|| Error::NotFound { id: id.to_string() })?;
+            .ok_or_else(|| MemeError::NotFound { id: id.to_string() })?;
 
         let mut updated = existing.clone();
         updated.content = new_content.to_owned();
@@ -165,7 +164,7 @@ impl Meme {
         let vec = vecs
             .into_iter()
             .next()
-            .ok_or_else(|| Error::Embedding("empty embedding".into()))?;
+            .ok_or_else(|| MemeError::Embedding("empty embedding".into()))?;
         self.store.update_entry(&updated, &vec).await?;
         self.record_event(
             id,
@@ -205,13 +204,13 @@ impl Meme {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NotFound`] if the entry does not exist.
+    /// Returns [`MemeError::NotFound`] if the entry does not exist.
     pub async fn delete(&self, id: Uuid) -> Result<()> {
         let existing = self
             .store
             .get_by_id(id)
             .await?
-            .ok_or_else(|| Error::NotFound { id: id.to_string() })?;
+            .ok_or_else(|| MemeError::NotFound { id: id.to_string() })?;
 
         self.store.delete_entries(&[id]).await?;
         self.record_event(id, EventType::Delete, Some(&existing.content), None)

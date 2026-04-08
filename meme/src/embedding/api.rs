@@ -4,14 +4,14 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 
 /// Maximum texts per single API call to avoid timeouts on large batches.
 const EMBED_BATCH_SIZE: usize = 128;
 
 /// Embedding provider that calls a remote OpenAI-compatible API.
 #[derive(Debug, Clone)]
-pub struct ApiEmbedding {
+pub(crate) struct ApiEmbedding {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
@@ -26,7 +26,7 @@ impl ApiEmbedding {
     /// # Errors
     ///
     /// Returns an error if the API key is missing.
-    pub fn new(
+    pub(crate) fn new(
         http: reqwest::Client,
         embedding_cfg: &crate::config::EmbeddingConfig,
         llm_cfg: &crate::config::LlmConfig,
@@ -35,7 +35,7 @@ impl ApiEmbedding {
             .api_key
             .as_deref()
             .or(llm_cfg.api_key.as_deref())
-            .ok_or_else(|| Error::Config("API key is required for API embedding".to_owned()))?
+            .ok_or_else(|| MemeError::Config("API key is required for API embedding".to_owned()))?
             .to_owned();
         let base_url = embedding_cfg
             .base_url
@@ -55,7 +55,7 @@ impl ApiEmbedding {
 
     /// Returns the dimensionality of the embedding vectors.
     #[must_use]
-    pub const fn dimension(&self) -> usize {
+    pub(crate) const fn dimension(&self) -> usize {
         self.dimension
     }
 
@@ -67,7 +67,7 @@ impl ApiEmbedding {
     ///
     /// Returns an error if encoding fails.
     #[tracing::instrument(skip(self, texts), fields(count = texts.len()))]
-    pub async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+    pub(crate) async fn encode_documents(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -99,7 +99,7 @@ impl ApiEmbedding {
         for handle in handles {
             let vectors = handle
                 .await
-                .map_err(|e| Error::Embedding(format!("embed task panicked: {e}")))??;
+                .map_err(|e| MemeError::Embedding(format!("embed task panicked: {e}")))??;
             all_vectors.extend(vectors);
         }
         Ok(all_vectors)
@@ -110,12 +110,12 @@ impl ApiEmbedding {
     /// # Errors
     ///
     /// Returns an error if encoding fails.
-    pub async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
+    pub(crate) async fn encode_query(&self, text: &str) -> Result<Vec<f32>> {
         let results = self.embed_with_retry(vec![text.to_owned()]).await?;
         results
             .into_iter()
             .next()
-            .ok_or_else(|| Error::Embedding("empty embedding response for query".to_owned()))
+            .ok_or_else(|| MemeError::Embedding("empty embedding response for query".to_owned()))
     }
 
     async fn embed_with_retry(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
@@ -123,21 +123,19 @@ impl ApiEmbedding {
         for attempt in 0..self.max_retries {
             match self.call_api(&input).await {
                 Ok(vectors) => return Ok(vectors),
+                Err(e) if !e.is_retryable() => return Err(e),
                 Err(e) => {
-                    if !e.is_retryable() {
-                        return Err(e);
-                    }
                     tracing::warn!(attempt = attempt + 1, error = %e, "embedding API call failed");
                     last_err = Some(e);
-                    if attempt + 1 < self.max_retries {
-                        let wait = 2u64.saturating_pow(attempt).min(30);
-                        tokio::time::sleep(Duration::from_secs(wait)).await;
-                    }
                 }
+            }
+            if attempt + 1 < self.max_retries {
+                let wait = 2u64.saturating_pow(attempt).min(30);
+                tokio::time::sleep(Duration::from_secs(wait)).await;
             }
         }
         Err(last_err
-            .unwrap_or_else(|| Error::Embedding("all embedding retries exhausted".to_owned())))
+            .unwrap_or_else(|| MemeError::Embedding("all embedding retries exhausted".to_owned())))
     }
 
     async fn call_api(&self, input: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -160,7 +158,7 @@ impl ApiEmbedding {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(Error::Embedding(format!(
+            return Err(MemeError::Embedding(format!(
                 "embedding API returned {status}: {text}"
             )));
         }
@@ -168,7 +166,7 @@ impl ApiEmbedding {
         let data: EmbeddingResponse = resp
             .json()
             .await
-            .map_err(|e| Error::Embedding(format!("failed to parse embedding response: {e}")))?;
+            .map_err(|e| MemeError::Embedding(format!("failed to parse embedding response: {e}")))?;
 
         let mut vectors: Vec<(usize, Vec<f32>)> = data
             .data

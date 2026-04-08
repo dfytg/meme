@@ -10,13 +10,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 
 /// Local reranker powered by [`fastembed::TextRerank`].
 ///
 /// Wraps an ONNX cross-encoder model that scores `(query, document)` pairs.
 /// Thread-safe via `Arc<Mutex<_>>` and async-safe via `spawn_blocking`.
-pub struct OnnxReranker {
+pub(crate) struct OnnxReranker {
     model: Arc<Mutex<fastembed::TextRerank>>,
 }
 
@@ -36,12 +36,12 @@ impl OnnxReranker {
     /// # Errors
     ///
     /// Returns an error if the model name is unknown or initialization fails.
-    pub fn new(model_name: &str) -> Result<Self> {
+    pub(crate) fn new(model_name: &str) -> Result<Self> {
         let reranker_model = resolve_model(model_name)?;
         let model = fastembed::TextRerank::try_new(
             fastembed::RerankInitOptions::new(reranker_model).with_show_download_progress(true),
         )
-        .map_err(|e| Error::Internal(format!("reranker init failed: {e}")))?;
+        .map_err(|e| MemeError::Internal(format!("reranker init failed: {e}")))?;
 
         Ok(Self {
             model: Arc::new(Mutex::new(model)),
@@ -56,7 +56,7 @@ impl OnnxReranker {
     /// # Errors
     ///
     /// Returns an error if the ONNX model inference fails.
-    pub async fn rerank(
+    pub(crate) async fn rerank(
         &self,
         query: &str,
         documents: &[&str],
@@ -74,17 +74,17 @@ impl OnnxReranker {
         tokio::task::spawn_blocking(move || {
             let mut guard = model
                 .lock()
-                .map_err(|e| Error::Internal(format!("reranker lock poisoned: {e}")))?;
+                .map_err(|e| MemeError::Internal(format!("reranker lock poisoned: {e}")))?;
             let doc_refs: Vec<&str> = docs.iter().map(String::as_str).collect();
             let results = guard
                 .rerank(query.as_str(), doc_refs.as_slice(), false, None)
-                .map_err(|e| Error::Internal(format!("reranker inference failed: {e}")))?;
+                .map_err(|e| MemeError::Internal(format!("reranker inference failed: {e}")))?;
 
             // Results are already sorted by score descending.
             Ok(results.into_iter().take(n).map(|r| r.index).collect())
         })
         .await
-        .map_err(|e| Error::Internal(format!("reranker spawn_blocking failed: {e}")))?
+        .map_err(|e| MemeError::Internal(format!("reranker spawn_blocking failed: {e}")))?
     }
 }
 
@@ -94,5 +94,5 @@ fn resolve_model(name: &str) -> Result<fastembed::RerankerModel> {
             return Ok(info.model);
         }
     }
-    Err(Error::Config(format!("unknown reranker model: {name}")))
+    Err(MemeError::Config(format!("unknown reranker model: {name}")))
 }

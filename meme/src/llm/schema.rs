@@ -11,7 +11,7 @@ use crate::model::Memory;
 
 /// Response from the extraction prompt (Stage 1).
 #[derive(Debug, Deserialize)]
-pub struct ExtractionResponse {
+pub(crate) struct ExtractionResponse {
     /// Extracted memory entries.
     #[serde(default)]
     pub entries: Vec<ExtractedEntry>,
@@ -19,7 +19,7 @@ pub struct ExtractionResponse {
 
 /// A single extracted entry from dialogue compression.
 #[derive(Debug, Deserialize)]
-pub struct ExtractedEntry {
+pub(crate) struct ExtractedEntry {
     /// Complete, unambiguous restatement.
     pub lossless_restatement: String,
     /// Core keywords for lexical matching.
@@ -45,7 +45,7 @@ pub struct ExtractedEntry {
 impl ExtractedEntry {
     /// Convert into a [`Memory`] with a fresh UUID.
     #[must_use]
-    pub fn into_memory(self) -> Option<Memory> {
+    pub(crate) fn into_memory(self) -> Option<Memory> {
         if self.lossless_restatement.is_empty() {
             return None;
         }
@@ -68,7 +68,7 @@ impl ExtractedEntry {
 
 /// Response from the query plan prompt (Stage 3).
 #[derive(Debug, Default, Deserialize)]
-pub struct QueryPlan {
+pub(crate) struct QueryPlan {
     /// Core keywords for lexical search.
     #[serde(default)]
     pub keywords: Vec<String>,
@@ -94,7 +94,7 @@ pub struct QueryPlan {
 
 /// Response from the reconcile prompt.
 #[derive(Debug, Deserialize)]
-pub struct ReconcileResponse {
+pub(crate) struct ReconcileResponse {
     /// Per-entry reconciliation decisions.
     #[serde(default)]
     pub actions: Vec<ReconcileAction>,
@@ -102,7 +102,7 @@ pub struct ReconcileResponse {
 
 /// A single reconciliation decision.
 #[derive(Debug, Deserialize)]
-pub struct ReconcileAction {
+pub(crate) struct ReconcileAction {
     /// Index into the new entries array.
     #[serde(default, deserialize_with = "deserialize_index")]
     pub new_index: Option<usize>,
@@ -116,7 +116,7 @@ pub struct ReconcileAction {
 
 /// Response from the answer generation prompt.
 #[derive(Debug, Deserialize)]
-pub struct AnswerResponse {
+pub(crate) struct AnswerResponse {
     /// The generated answer text.
     #[serde(default)]
     pub answer: String,
@@ -124,7 +124,7 @@ pub struct AnswerResponse {
 
 /// Response from the completeness check prompt.
 #[derive(Debug, Deserialize)]
-pub struct CompletenessResponse {
+pub(crate) struct CompletenessResponse {
     /// "complete" or "incomplete".
     #[serde(default)]
     pub assessment: String,
@@ -132,7 +132,7 @@ pub struct CompletenessResponse {
 
 /// Response from the missing-info queries prompt.
 #[derive(Debug, Deserialize)]
-pub struct MissingQueriesResponse {
+pub(crate) struct MissingQueriesResponse {
     /// Additional targeted search queries.
     #[serde(default)]
     pub targeted_queries: Vec<String>,
@@ -140,7 +140,7 @@ pub struct MissingQueriesResponse {
 
 /// Response from the metadata re-extraction prompt.
 #[derive(Debug, Deserialize)]
-pub struct ReExtractResponse {
+pub(crate) struct ReExtractResponse {
     /// Core keywords.
     #[serde(default)]
     pub keywords: Vec<String>,
@@ -163,7 +163,7 @@ pub struct ReExtractResponse {
 
 impl ReExtractResponse {
     /// Apply extracted metadata onto an existing [`Memory`].
-    pub fn apply_to(self, entry: &mut Memory) {
+    pub(crate) fn apply_to(self, entry: &mut Memory) {
         entry.keywords = self.keywords;
         entry.persons = self.persons;
         entry.entities = self.entities;
@@ -206,10 +206,9 @@ where
     D: serde::Deserializer<'de>,
 {
     let val: Option<serde_json::Value> = Option::deserialize(deserializer)?;
-    #[allow(clippy::cast_possible_truncation)]
     Ok(val.and_then(|v| {
         v.as_u64()
-            .map(|n| n as usize)
+            .and_then(|n| usize::try_from(n).ok())
             .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
     }))
 }

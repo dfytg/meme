@@ -8,13 +8,13 @@
 use std::sync::Arc;
 
 use crate::config::PipelineConfig;
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 use crate::llm::{ChatOptions, ExtractionResponse, LlmClient, Message, prompt};
 use crate::model::{Dialogue, Memory};
 
 /// Dialogue-to-memory extractor implementing Stage 1 (Semantic Structured Compression)
 /// of the pipeline.
-pub struct Extractor {
+pub(crate) struct Extractor {
     llm: Arc<LlmClient>,
     window_size: usize,
     overlap_size: usize,
@@ -33,14 +33,14 @@ impl std::fmt::Debug for Extractor {
             .field("overlap_size", &self.overlap_size)
             .field("buffer_len", &self.dialogue_buffer.len())
             .field("processed_count", &self.processed_count)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl Extractor {
     /// Create a new extractor.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         llm: Arc<LlmClient>,
         pipeline_cfg: &PipelineConfig,
         max_parallel_workers: usize,
@@ -70,7 +70,7 @@ impl Extractor {
     ///
     /// Returns an error if LLM extraction fails.
     #[tracing::instrument(skip(self, dialogues), fields(count = dialogues.len()))]
-    pub async fn add_dialogues(&mut self, dialogues: Vec<Dialogue>) -> Result<Vec<Memory>> {
+    pub(crate) async fn add_dialogues(&mut self, dialogues: Vec<Dialogue>) -> Result<Vec<Memory>> {
         if dialogues.len() > self.window_size * 2 {
             return self.add_dialogues_parallel(dialogues).await;
         }
@@ -90,7 +90,7 @@ impl Extractor {
     ///
     /// Returns an error if LLM extraction fails.
     #[tracing::instrument(skip(self), fields(remaining = self.dialogue_buffer.len()))]
-    pub async fn flush(&mut self) -> Result<Vec<Memory>> {
+    pub(crate) async fn flush(&mut self) -> Result<Vec<Memory>> {
         if self.dialogue_buffer.is_empty() {
             return Ok(Vec::new());
         }
@@ -111,7 +111,7 @@ impl Extractor {
         }
 
         let end = self.window_size.min(self.dialogue_buffer.len());
-        let window: Vec<Dialogue> = self.dialogue_buffer[..end].to_vec();
+        let window: Vec<Dialogue> = self.dialogue_buffer.get(..end).unwrap_or_default().to_vec();
         let advance = self.step_size.min(self.dialogue_buffer.len());
         drop(self.dialogue_buffer.drain(..advance));
 
@@ -136,11 +136,11 @@ impl Extractor {
         let mut windows = Vec::new();
         let mut pos = 0;
         while pos + self.window_size <= self.dialogue_buffer.len() {
-            let window = self.dialogue_buffer[pos..pos + self.window_size].to_vec();
+            let window = self.dialogue_buffer.get(pos..pos + self.window_size).unwrap_or_default().to_vec();
             windows.push(window);
             pos += self.step_size;
         }
-        let remaining = self.dialogue_buffer[pos..].to_vec();
+        let remaining = self.dialogue_buffer.get(pos..).unwrap_or_default().to_vec();
         if !remaining.is_empty() {
             windows.push(remaining);
         }
@@ -183,12 +183,12 @@ impl Extractor {
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "task panicked");
-                    errors.push(Error::Internal(format!("task panicked: {e}")));
+                    errors.push(MemeError::Internal(format!("task panicked: {e}")));
                 }
             }
         }
         if !errors.is_empty() && all_entries.is_empty() {
-            return Err(errors.into_iter().next().expect("non-empty errors"));
+            return Err(errors.swap_remove(0));
         }
         if !errors.is_empty() {
             tracing::warn!(
@@ -200,7 +200,7 @@ impl Extractor {
 
         self.processed_count += total_dialogues;
         if !all_entries.is_empty() {
-            self.previous_entries = all_entries[all_entries.len().saturating_sub(10)..].to_vec();
+            self.previous_entries = all_entries.get(all_entries.len().saturating_sub(10)..).unwrap_or_default().to_vec();
         }
 
         Ok(all_entries)

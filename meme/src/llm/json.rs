@@ -4,7 +4,7 @@
 //! This module only activates as a fallback when direct `serde_json::from_str` fails
 //! (e.g. non-OpenAI providers wrapping JSON in markdown fences).
 
-use crate::error::{Error, Result};
+use crate::error::{MemeError, Result};
 
 /// Extract a JSON value from text that may be wrapped in markdown fences.
 ///
@@ -13,10 +13,10 @@ use crate::error::{Error, Result};
 /// # Errors
 ///
 /// Returns an error if no valid JSON can be found.
-pub fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
+pub(super) fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
     let text = text.trim();
     if text.is_empty() {
-        return Err(Error::JsonParse("empty response".to_owned()));
+        return Err(MemeError::JsonParse("empty response".to_owned()));
     }
 
     if let Ok(v) = serde_json::from_str(text) {
@@ -36,7 +36,7 @@ pub fn extract_json_from_text(text: &str) -> Result<serde_json::Value> {
         return Ok(v);
     }
 
-    Err(Error::JsonParse(format!(
+    Err(MemeError::JsonParse(format!(
         "no valid JSON found in: {}...",
         &text[..text.len().min(200)]
     )))
