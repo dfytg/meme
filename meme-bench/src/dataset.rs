@@ -85,39 +85,66 @@ pub struct Question {
 mod raw {
     use serde::Deserialize;
 
+    /// A single LOCOMO conversation entry.
     #[derive(Debug, Deserialize)]
-    pub struct LocomoEntry {
+    pub(super) struct LocomoEntry {
+        /// Question-answer pairs for this conversation.
         pub qa: Vec<RawQuestion>,
+        /// Raw conversation data.
         pub conversation: Conversation,
     }
 
+    /// A question from the LOCOMO benchmark.
     #[derive(Debug, Deserialize)]
-    pub struct RawQuestion {
+    pub(super) struct RawQuestion {
+        /// The question text.
         pub question: String,
+        /// Ground-truth answer (string or array).
         pub answer: Option<serde_json::Value>,
+        /// Supporting evidence passages.
         #[serde(default)]
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "deserialized from JSON but not yet used in benchmarks"
+        )]
         pub evidence: Vec<String>,
+        /// Category code (1-5).
         pub category: u8,
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "deserialized from JSON but not yet used in benchmarks"
+        )]
+        /// Adversarial (incorrect) answer for category-5 questions.
         pub adversarial_answer: Option<String>,
     }
 
+    /// Raw LOCOMO conversation object.
     #[derive(Debug, Deserialize)]
-    pub struct Conversation {
+    pub(super) struct Conversation {
+        /// Name of the first speaker.
         pub speaker_a: String,
+        /// Name of the second speaker.
         pub speaker_b: String,
+        /// Flattened session keys → JSON values.
         #[serde(flatten)]
         pub sessions: std::collections::BTreeMap<String, serde_json::Value>,
     }
 
+    /// A single dialogue line within a session.
     #[derive(Debug, Deserialize)]
-    pub struct DialogueItem {
+    pub(super) struct DialogueItem {
+        /// Speaker name.
         pub speaker: String,
+        /// Dialogue text.
         pub text: String,
+        /// Optional dialogue identifier.
         #[serde(default)]
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "deserialized from JSON but not yet used in benchmarks"
+        )]
         pub dia_id: Option<String>,
+        /// Optional image caption.
         #[serde(default)]
         pub blip_caption: Option<String>,
     }
@@ -161,6 +188,7 @@ pub fn load_locomo(path: &std::path::Path) -> Result<BenchmarkDataset, String> {
     })
 }
 
+/// Extract dialogue turns from a raw conversation.
 fn extract_dialogues(conv: &raw::Conversation) -> Vec<DialogueTurn> {
     let mut dialogues = Vec::new();
 
@@ -192,15 +220,7 @@ fn extract_dialogues(conv: &raw::Conversation) -> Vec<DialogueTurn> {
         };
 
         for item in items {
-            let content = if let Some(caption) = &item.blip_caption {
-                if item.text.is_empty() {
-                    format!("[Image: {caption}]")
-                } else {
-                    format!("[Image: {caption}] {}", item.text)
-                }
-            } else {
-                item.text
-            };
+            let content = format_dialogue_content(item.blip_caption.as_deref(), item.text);
             dialogues.push(DialogueTurn {
                 speaker: item.speaker,
                 content,
@@ -211,6 +231,16 @@ fn extract_dialogues(conv: &raw::Conversation) -> Vec<DialogueTurn> {
     dialogues
 }
 
+/// Format a dialogue line, prepending an image caption if present.
+fn format_dialogue_content(caption: Option<&str>, text: String) -> String {
+    match caption {
+        Some(cap) if text.is_empty() => format!("[Image: {cap}]"),
+        Some(cap) => format!("[Image: {cap}] {text}"),
+        None => text,
+    }
+}
+
+/// Map a LOCOMO category code to [`QuestionCategory`].
 const fn map_category(cat: u8) -> QuestionCategory {
     match cat {
         2 => QuestionCategory::Temporal,
@@ -221,6 +251,7 @@ const fn map_category(cat: u8) -> QuestionCategory {
     }
 }
 
+/// Convert a raw LOCOMO question to a [`Question`].
 fn convert_question(scenario_idx: usize, q_idx: usize, q: raw::RawQuestion) -> Question {
     let category = map_category(q.category);
 

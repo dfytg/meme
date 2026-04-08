@@ -7,7 +7,7 @@ use crate::config_loader;
 
 /// Initialize meme configuration and database.
 #[derive(Debug, Args)]
-pub struct InitCmd {
+pub(crate) struct InitCmd {
     /// Force overwrite existing configuration.
     #[arg(long)]
     force: bool,
@@ -19,7 +19,7 @@ impl InitCmd {
     /// # Errors
     ///
     /// Returns an error if initialization fails.
-    pub fn run(&self, ctx: &super::Context) -> anyhow::Result<()> {
+    pub(crate) fn run(&self, ctx: &super::Context) -> anyhow::Result<()> {
         let config_path = ctx
             .config_path
             .clone()

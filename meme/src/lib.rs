@@ -80,7 +80,6 @@
 //! | `llm` | pub(crate) | OpenAI-compatible LLM client, prompts, JSON schemas |
 //! | `pipeline` | pub(crate) | Extractor, reconciler, hybrid retriever, answer generator |
 
-
 mod builder;
 pub mod config;
 pub(crate) mod embedding;
@@ -94,7 +93,9 @@ pub(crate) mod reranking;
 pub mod store;
 
 pub use builder::MemeBuilder;
+pub use error::MemeError;
 pub use meme::Meme;
 pub use model::{Dialogue, Event, EventType, Memory};
-pub use error::MemeError;
 pub use store::{ConsolidationParams, ConsolidationStats};
+#[cfg(test)]
+use tracing_subscriber as _;

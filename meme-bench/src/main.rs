@@ -14,18 +14,30 @@
 //! MEME_LLM_API_KEY=sk-... meme-bench run --dataset my_bench.json --model gpt-4.1-mini
 //! ```
 
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::future_not_send)]
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::future_not_send,
+    reason = "benchmark binary uses stdout/stderr and single-threaded tokio"
+)]
 
+use chrono as _;
 use clap::{Parser, Subcommand};
+use meme as _;
 use meme_bench::{dataset, runner};
+use serde as _;
+use tracing as _;
 
+/// CLI argument parser.
 #[derive(Debug, Parser)]
 #[command(name = "meme-bench", version, about = "LOCOMO benchmark for meme")]
 struct Cli {
+    /// Subcommand to execute.
     #[command(subcommand)]
     command: Command,
 }
 
+/// Available subcommands.
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run the benchmark against a LOCOMO-format dataset.
@@ -34,6 +46,7 @@ enum Command {
     Sample(SampleCmd),
 }
 
+/// Generate a sample benchmark dataset.
 #[derive(Debug, clap::Args)]
 struct SampleCmd {
     /// Output file path.
@@ -41,7 +54,7 @@ struct SampleCmd {
     output: String,
 }
 
-fn main() {
+fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -50,7 +63,10 @@ fn main() {
         .init();
 
     let cli = Cli::parse();
-    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        eprintln!("failed to create tokio runtime");
+        return std::process::ExitCode::FAILURE;
+    };
 
     let result = match cli.command {
         Command::Run(cmd) => rt.block_on(cmd.run()),
@@ -59,10 +75,12 @@ fn main() {
 
     if let Err(e) = result {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        return std::process::ExitCode::FAILURE;
     }
+    std::process::ExitCode::SUCCESS
 }
 
+/// Write a sample benchmark dataset to `path`.
 fn generate_sample(path: &str) -> anyhow::Result<()> {
     let sample = dataset::sample_dataset();
     let json = serde_json::to_string_pretty(&sample)?;

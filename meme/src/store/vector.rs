@@ -15,9 +15,13 @@ use crate::model::{Memory, MetadataFilter};
 
 /// `LanceDB`-backed vector store with multi-view indexing.
 pub struct VectorStore {
+    /// `LanceDB` connection handle.
     db: lancedb::Connection,
+    /// Name of the `LanceDB` table.
     table_name: String,
+    /// Expected embedding dimension.
     dimension: usize,
+    /// Cached table handle to avoid repeated lookups.
     cached_table: tokio::sync::RwLock<Option<lancedb::Table>>,
 }
 
@@ -50,6 +54,7 @@ impl VectorStore {
         Ok(store)
     }
 
+    /// Create the table if it does not exist, or open and index it.
     async fn ensure_table(&self) -> Result<()> {
         let tables = self.db.table_names().execute().await?;
 
@@ -68,9 +73,11 @@ impl VectorStore {
         Ok(())
     }
 
+    /// Build the Arrow schema for the memories table.
     fn build_schema(&self) -> Result<SchemaRef> {
-        let dim = i32::try_from(self.dimension)
-            .map_err(|_| MemeError::Config(format!("dimension {} overflows i32", self.dimension)))?;
+        let dim = i32::try_from(self.dimension).map_err(|_| {
+            MemeError::Config(format!("dimension {} overflows i32", self.dimension))
+        })?;
         Ok(Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("content", DataType::Utf8, false),
@@ -85,15 +92,13 @@ impl VectorStore {
             Field::new("namespace", DataType::Utf8, true),
             Field::new(
                 "vector",
-                DataType::FixedSizeList(
-                    Arc::new(Field::new("item", DataType::Float32, true)),
-                    dim,
-                ),
+                DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dim),
                 false,
             ),
         ])))
     }
 
+    /// Get the table handle, using the cache if available.
     async fn get_table(&self) -> Result<lancedb::Table> {
         {
             let guard = self.cached_table.read().await;
@@ -106,6 +111,7 @@ impl VectorStore {
         Ok(table)
     }
 
+    /// Clear the cached table handle.
     async fn invalidate_cache(&self) {
         *self.cached_table.write().await = None;
     }
@@ -127,6 +133,7 @@ impl VectorStore {
         }
     }
 
+    /// Convert an Arrow `RecordBatch` into `Memory` structs.
     fn batch_to_entries(batch: &RecordBatch) -> Vec<Memory> {
         fn str_val(col: Option<&StringArray>, i: usize) -> String {
             col.map(|c| c.value(i).to_owned()).unwrap_or_default()
@@ -500,6 +507,7 @@ impl VectorStore {
         Ok(table.count_rows(namespace_clause(namespace)).await?)
     }
 
+    /// Drain a record-batch stream into a `Vec<Memory>`.
     async fn collect_entries(
         &self,
         stream: impl futures::Stream<Item = std::result::Result<RecordBatch, lancedb::Error>>
@@ -540,6 +548,7 @@ impl VectorStore {
     }
 }
 
+/// Build a `FixedSizeListArray` column from embedding vectors.
 fn build_vector_column(vectors: &[Vec<f32>], dimension: usize) -> Result<ArrayRef> {
     let flat: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
     let values = Float32Array::from(flat);
@@ -571,6 +580,7 @@ fn escape_sql_string(s: &str) -> String {
     s.replace('\'', "''")
 }
 
+/// Extract embedding vectors from a `RecordBatch`.
 fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
     let n = batch.num_rows();
     let Some(col) = batch.column_by_name("vector") else {
@@ -589,7 +599,13 @@ fn batch_to_vectors(batch: &RecordBatch, dimension: usize) -> Vec<Vec<f32>> {
         let start = i * dimension;
         let end = start + dimension;
         if end <= float_values.len() {
-            vectors.push(float_values.values().get(start..end).unwrap_or_default().to_vec());
+            vectors.push(
+                float_values
+                    .values()
+                    .get(start..end)
+                    .unwrap_or_default()
+                    .to_vec(),
+            );
         } else {
             vectors.push(Vec::new());
         }

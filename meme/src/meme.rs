@@ -21,13 +21,21 @@ use crate::store::{self, ConsolidationStats, HistoryStore, VectorStore};
 /// Wraps the three-stage pipeline (compression, reconciliation, retrieval)
 /// behind a simple async API with full CRUD and history tracking.
 pub struct Meme {
+    /// LLM client shared across pipeline stages.
     pub(crate) llm: Arc<LlmClient>,
+    /// Vector store backend.
     pub(crate) store: Arc<VectorStore>,
+    /// Embedding model.
     pub(crate) embedder: Arc<Embedder>,
+    /// `SQLite` history store.
     pub(crate) history: Arc<HistoryStore>,
+    /// Dialogue-to-memory extractor (mutable, behind a lock).
     pub(crate) extractor: Mutex<Extractor>,
+    /// Hybrid retriever for search and ask.
     pub(crate) retriever: HybridRetriever,
+    /// Full configuration snapshot.
     pub(crate) config: Config,
+    /// Optional namespace for multi-tenant isolation.
     pub(crate) namespace: Option<String>,
 }
 
@@ -301,10 +309,12 @@ impl Meme {
         &self.config
     }
 
+    /// Return the namespace filter as a `&str` slice.
     fn ns(&self) -> Option<&str> {
         self.namespace.as_deref()
     }
 
+    /// Stamp the default namespace onto entries that have none.
     fn apply_namespace(&self, entries: &mut [Memory]) {
         for entry in entries {
             if entry.namespace.is_none() {
@@ -313,6 +323,7 @@ impl Meme {
         }
     }
 
+    /// Best-effort history recording; logs on failure.
     async fn record_event(
         &self,
         memory_id: Uuid,
@@ -329,6 +340,7 @@ impl Meme {
         }
     }
 
+    /// Embed, reconcile, and store entries.
     async fn ingest_entries(&self, entries: &[Memory]) -> Result<()> {
         let mut scoped: Vec<Memory> = entries.to_vec();
         self.apply_namespace(&mut scoped);

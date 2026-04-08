@@ -6,7 +6,7 @@ use super::Context;
 
 /// Delete a memory entry by its UUID.
 #[derive(Debug, Args)]
-pub struct DeleteCmd {
+pub(crate) struct DeleteCmd {
     /// Memory entry UUID.
     pub id: String,
 }
@@ -17,7 +17,7 @@ impl DeleteCmd {
     /// # Errors
     ///
     /// Returns an error if the delete fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let uuid = super::parse_uuid(&self.id)?;
         let meme = ctx.build_meme().await?;
         meme.delete(uuid).await?;

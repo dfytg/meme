@@ -12,7 +12,9 @@ use crate::error::{MemeError, Result};
 /// Handles model download, tokenization, ONNX inference, pooling, and
 /// L2 normalization automatically.
 pub(crate) struct OnnxEmbedding {
+    /// Thread-safe handle to the ONNX text embedding model.
     model: Arc<Mutex<fastembed::TextEmbedding>>,
+    /// Output vector dimension.
     dimension: usize,
 }
 
@@ -90,11 +92,14 @@ impl OnnxEmbedding {
     }
 }
 
+/// Resolve a model code string to a [`fastembed::EmbeddingModel`] and its dimension.
 fn resolve_model(name: &str) -> Result<(fastembed::EmbeddingModel, usize)> {
     for info in fastembed::TextEmbedding::list_supported_models() {
         if info.model_code == name {
             return Ok((info.model, info.dim));
         }
     }
-    Err(MemeError::Config(format!("unknown fastembed model: {name}")))
+    Err(MemeError::Config(format!(
+        "unknown fastembed model: {name}"
+    )))
 }

@@ -6,7 +6,7 @@ use super::Context;
 
 /// Export memory entries to JSON.
 #[derive(Debug, Args)]
-pub struct ExportCmd {
+pub(crate) struct ExportCmd {
     /// Output file path (stdout if not specified).
     #[arg(short, long)]
     pub output: Option<String>,
@@ -18,7 +18,7 @@ impl ExportCmd {
     /// # Errors
     ///
     /// Returns an error if the export fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let meme = ctx.build_meme().await?;
         let entries = meme.list().await?;
         let json = serde_json::to_string_pretty(&entries)?;
@@ -35,7 +35,7 @@ impl ExportCmd {
 
 /// Import memory entries from a JSON file.
 #[derive(Debug, Args)]
-pub struct ImportCmd {
+pub(crate) struct ImportCmd {
     /// Input file path.
     pub file: String,
 }
@@ -46,7 +46,7 @@ impl ImportCmd {
     /// # Errors
     ///
     /// Returns an error if the import fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(&self.file)?;
         let entries: Vec<meme::Memory> = serde_json::from_str(&content)?;
 

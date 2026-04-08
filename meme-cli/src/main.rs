@@ -1,6 +1,11 @@
 //! meme-cli — interactive management tool for the meme memory system.
 
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::future_not_send)]
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::future_not_send,
+    reason = "CLI binary uses stdout/stderr and single-threaded tokio"
+)]
 
 mod commands;
 mod config_loader;
@@ -8,6 +13,7 @@ mod config_loader;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use serde as _;
 
 /// Long-term memory for AI agents.
 #[derive(Debug, Parser)]
@@ -21,10 +27,12 @@ struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
 
+    /// Subcommand to execute.
     #[command(subcommand)]
     command: Command,
 }
 
+/// Available CLI subcommands.
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Initialize configuration and database.
@@ -59,7 +67,7 @@ enum Command {
     Config(commands::config::ConfigCmd),
 }
 
-fn main() {
+fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -68,7 +76,10 @@ fn main() {
         .init();
 
     let cli = Cli::parse();
-    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        eprintln!("failed to create tokio runtime");
+        return std::process::ExitCode::FAILURE;
+    };
 
     let ctx = commands::Context {
         namespace: cli.namespace,
@@ -77,10 +88,12 @@ fn main() {
 
     if let Err(e) = rt.block_on(run(cli.command, &ctx)) {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        return std::process::ExitCode::FAILURE;
     }
+    std::process::ExitCode::SUCCESS
 }
 
+/// Dispatch a parsed subcommand.
 async fn run(cmd: Command, ctx: &commands::Context) -> anyhow::Result<()> {
     match cmd {
         Command::Init(c) => c.run(ctx),

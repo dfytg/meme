@@ -127,7 +127,11 @@ Return ONLY the JSON, no other text."#
 
 /// Build the information completeness analysis prompt (reflection).
 #[must_use]
-pub(crate) fn completeness_check(query: &str, context_str: &str, required_info_json: &str) -> String {
+pub(crate) fn completeness_check(
+    query: &str,
+    context_str: &str,
+    required_info_json: &str,
+) -> String {
     format!(
         r#"Analyze whether the provided information is sufficient to completely answer the original question, based on the identified information requirements.
 
@@ -159,7 +163,11 @@ Return ONLY the JSON, no other text."#
 
 /// Build the missing-info query generation prompt (reflection additional queries).
 #[must_use]
-pub(crate) fn missing_info_queries(query: &str, context_str: &str, required_info_json: &str) -> String {
+pub(crate) fn missing_info_queries(
+    query: &str,
+    context_str: &str,
+    required_info_json: &str,
+) -> String {
     format!(
         r#"Based on the original question, required information types, and currently available information, generate targeted search queries to find the missing information.
 
@@ -274,6 +282,7 @@ pub(crate) fn format_contexts(entries: &[&Memory]) -> String {
         .join("\n\n")
 }
 
+/// Format one retrieved context block for inclusion in an LLM prompt.
 fn format_single_context(i: usize, e: &Memory) -> String {
     let mut parts = vec![format!("[Context {}]", i + 1)];
     parts.push(format!("Content: {}", e.content));

@@ -6,7 +6,7 @@ use super::Context;
 
 /// Get a memory entry by its UUID.
 #[derive(Debug, Args)]
-pub struct GetCmd {
+pub(crate) struct GetCmd {
     /// Memory entry UUID.
     pub id: String,
 }
@@ -17,7 +17,7 @@ impl GetCmd {
     /// # Errors
     ///
     /// Returns an error if the query fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let uuid = super::parse_uuid(&self.id)?;
         let meme = ctx.build_meme().await?;
         let entry = meme

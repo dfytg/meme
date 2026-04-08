@@ -9,7 +9,7 @@ use super::Context;
 /// Without `--speaker`, stores content as a direct fact via `put()`.
 /// With `--speaker`, stores as a dialogue turn via `add()` + `flush()`.
 #[derive(Debug, Args)]
-pub struct AddCmd {
+pub(crate) struct AddCmd {
     /// Speaker name (omit for direct fact ingestion).
     #[arg(short, long)]
     pub speaker: Option<String>,
@@ -32,7 +32,7 @@ impl AddCmd {
     /// # Errors
     ///
     /// Returns an error if adding fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         if let Some(file_path) = &self.file {
             self.import_file(ctx, file_path).await
         } else {
@@ -40,6 +40,7 @@ impl AddCmd {
         }
     }
 
+    /// Add a single dialogue turn or raw fact.
     async fn add_single(&self, ctx: &Context) -> anyhow::Result<()> {
         let content = self
             .content
@@ -73,6 +74,7 @@ impl AddCmd {
         Ok(())
     }
 
+    /// Bulk-import dialogues from a text file ("speaker: text" per line).
     async fn import_file(&self, ctx: &Context, path: &str) -> anyhow::Result<()> {
         let content = std::fs::read_to_string(path)?;
         let mut dialogues = Vec::new();
@@ -85,9 +87,17 @@ impl AddCmd {
             let v: serde_json::Value = serde_json::from_str(line)
                 .map_err(|e| anyhow::anyhow!("invalid JSONL at line {}: {e}", line_num + 1))?;
 
-            let speaker = v["speaker"].as_str().unwrap_or("unknown").to_owned();
-            let text = v["content"].as_str().unwrap_or("").to_owned();
-            let timestamp = v["timestamp"].as_str().and_then(|s| {
+            let speaker = v
+                .get("speaker")
+                .and_then(|s| s.as_str())
+                .unwrap_or("unknown")
+                .to_owned();
+            let text = v
+                .get("content")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let timestamp = v.get("timestamp").and_then(|s| s.as_str()).and_then(|s| {
                 chrono::DateTime::parse_from_rfc3339(s)
                     .ok()
                     .map(|dt| dt.with_timezone(&chrono::Utc))

@@ -19,11 +19,17 @@ use crate::store::VectorStore;
 /// Hybrid retriever that combines semantic, lexical, and symbolic search
 /// with LLM-driven intent analysis and reflection.
 pub(crate) struct HybridRetriever {
+    /// LLM client for query planning and reflection.
     llm: Arc<LlmClient>,
+    /// Vector store backend.
     store: Arc<VectorStore>,
+    /// Embedding model.
     embedder: Arc<Embedder>,
+    /// Pipeline tuning parameters.
     config: PipelineConfig,
+    /// Optional namespace filter.
     namespace: Option<String>,
+    /// Optional ONNX cross-encoder reranker.
     #[cfg(feature = "onnx")]
     reranker: Option<Arc<crate::reranking::OnnxReranker>>,
 }
@@ -73,6 +79,7 @@ impl HybridRetriever {
         }
     }
 
+    /// Full retrieval pipeline with query planning and optional reflection.
     #[tracing::instrument(skip(self))]
     async fn retrieve_with_planning(&self, query: &str) -> Result<Vec<Memory>> {
         let plan = self.plan_query(query).await?;
@@ -109,6 +116,7 @@ impl HybridRetriever {
         Ok(merged)
     }
 
+    /// Run a single semantic (embedding) search.
     async fn semantic_search(&self, query: &str) -> Result<Vec<Memory>> {
         let query_vec = self.embedder.encode_query(query).await?;
         self.store
@@ -116,6 +124,7 @@ impl HybridRetriever {
             .await
     }
 
+    /// Run keyword (LIKE) search against the store.
     async fn keyword_search(&self, query: &str, plan: &QueryPlan) -> Result<Vec<Memory>> {
         let keywords = if plan.keywords.is_empty() {
             vec![query.to_owned()]
@@ -127,6 +136,7 @@ impl HybridRetriever {
             .await
     }
 
+    /// Run structured metadata search (persons, location, time range).
     async fn structured_search(&self, plan: &QueryPlan) -> Result<Vec<Memory>> {
         let persons = Some(&plan.persons).filter(|v| !v.is_empty()).cloned();
         let entities = Some(&plan.entities).filter(|v| !v.is_empty()).cloned();
@@ -149,10 +159,12 @@ impl HybridRetriever {
             .await
     }
 
+    /// Return the namespace filter as a `&str` slice.
     fn ns(&self) -> Option<&str> {
         self.namespace.as_deref()
     }
 
+    /// Execute multiple semantic searches in parallel.
     async fn execute_semantic_searches(&self, queries: &[String]) -> Result<Vec<Memory>> {
         if queries.is_empty() {
             return Ok(Vec::new());
@@ -190,6 +202,7 @@ impl HybridRetriever {
         Ok(all_results)
     }
 
+    /// Ask the LLM to decompose a query into a structured plan.
     async fn plan_query(&self, query: &str) -> Result<QueryPlan> {
         let prompt = prompt::query_plan(query);
         let messages = vec![
@@ -220,6 +233,7 @@ impl HybridRetriever {
         }
     }
 
+    /// Iterative reflection: check completeness and fetch missing info.
     async fn reflect(
         &self,
         query: &str,
@@ -272,6 +286,7 @@ impl HybridRetriever {
         Ok(current)
     }
 
+    /// Ask the LLM whether the retrieved context covers the query.
     async fn check_completeness(
         &self,
         query: &str,
@@ -290,6 +305,7 @@ impl HybridRetriever {
         self.llm.chat_structured(&messages, &opts).await
     }
 
+    /// Ask the LLM to produce additional search queries for missing info.
     async fn generate_missing_queries(
         &self,
         query: &str,
@@ -324,22 +340,25 @@ impl HybridRetriever {
                 after = indices.len(),
                 "reranked results"
             );
-            return Ok(indices.into_iter().map(|i| entries[i].clone()).collect());
+            return Ok(indices
+                .into_iter()
+                .filter_map(|i| entries.get(i).cloned())
+                .collect());
         }
         Ok(entries)
     }
-
 }
 
+/// Remove duplicate entries by `id`.
 fn deduplicate(entries: Vec<Memory>) -> Vec<Memory> {
     let mut seen = HashSet::new();
     entries.into_iter().filter(|e| seen.insert(e.id)).collect()
 }
 
-static RE_LAST_N_DAYS: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"last\s+(\d+)\s+days?").unwrap_or_else(|_| unreachable!())
-    });
+/// Regex for "last N days" time expressions.
+static RE_LAST_N_DAYS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"last\s+(\d+)\s+days?").unwrap_or_else(|_| unreachable!())
+});
 
 /// Parse a time expression into a `(start, end)` datetime range.
 ///
@@ -528,8 +547,8 @@ mod tests {
         let e1_dup = e1.clone();
         let results = deduplicate(vec![e1.clone(), e2.clone(), e1_dup]);
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].id, e1.id);
-        assert_eq!(results[1].id, e2.id);
+        assert_eq!(results.first().expect("2 results").id, e1.id);
+        assert_eq!(results.get(1).expect("2 results").id, e2.id);
     }
 
     #[test]

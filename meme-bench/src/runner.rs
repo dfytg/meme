@@ -36,23 +36,36 @@ pub struct RunCmd {
 /// Full benchmark report.
 #[derive(Debug, serde::Serialize)]
 struct BenchmarkReport {
+    /// Name of the evaluated dataset.
     dataset_name: String,
+    /// LLM model used.
     model: String,
+    /// Number of scenarios evaluated.
     total_scenarios: usize,
+    /// Total questions across all scenarios.
     total_questions: usize,
+    /// Wall-clock duration in seconds.
     duration_secs: f64,
+    /// Aggregate metrics across all scenarios.
     aggregate: AggregateMetrics,
+    /// Per-scenario breakdown.
     scenario_results: Vec<ScenarioReport>,
 }
 
 /// Per-scenario report.
 #[derive(Debug, serde::Serialize)]
 struct ScenarioReport {
+    /// Scenario identifier.
     scenario_id: String,
+    /// Human-readable description.
     description: String,
+    /// Number of dialogue turns.
     num_dialogues: usize,
+    /// Number of questions.
     num_questions: usize,
+    /// Aggregate metrics for this scenario.
     aggregate: AggregateMetrics,
+    /// Per-question results.
     questions: Vec<QuestionResult>,
 }
 
@@ -113,30 +126,31 @@ impl RunCmd {
                 scenario.questions.len()
             );
 
-            match self.run_scenario(scenario).await {
-                Ok((results, scenario_agg)) => {
-                    println!(
-                        "  F1: {:.1}%  EM: {:.1}%",
-                        scenario_agg.mean_f1 * 100.0,
-                        scenario_agg.exact_match_rate * 100.0
-                    );
-                    for (cat, cm) in &scenario_agg.per_category {
-                        println!("    {cat}: F1={:.1}% (n={})", cm.mean_f1 * 100.0, cm.count);
-                    }
-                    scenario_reports.push(ScenarioReport {
-                        scenario_id: scenario.id.clone(),
-                        description: scenario.description.clone(),
-                        num_dialogues: scenario.dialogues.len(),
-                        num_questions: scenario.questions.len(),
-                        aggregate: scenario_agg,
-                        questions: results.clone(),
-                    });
-                    all_results.extend(results);
-                }
+            let (results, scenario_agg) = match self.run_scenario(scenario).await {
+                Ok(pair) => pair,
                 Err(e) => {
                     eprintln!("  ERROR: {e}");
+                    println!();
+                    continue;
                 }
+            };
+            println!(
+                "  F1: {:.1}%  EM: {:.1}%",
+                scenario_agg.mean_f1 * 100.0,
+                scenario_agg.exact_match_rate * 100.0
+            );
+            for (cat, cm) in &scenario_agg.per_category {
+                println!("    {cat}: F1={:.1}% (n={})", cm.mean_f1 * 100.0, cm.count);
             }
+            scenario_reports.push(ScenarioReport {
+                scenario_id: scenario.id.clone(),
+                description: scenario.description.clone(),
+                num_dialogues: scenario.dialogues.len(),
+                num_questions: scenario.questions.len(),
+                aggregate: scenario_agg,
+                questions: results.clone(),
+            });
+            all_results.extend(results);
             println!();
         }
 
@@ -183,6 +197,7 @@ impl RunCmd {
         Ok(())
     }
 
+    /// Run a single scenario: ingest dialogues then evaluate questions.
     async fn run_scenario(
         &self,
         scenario: &Scenario,

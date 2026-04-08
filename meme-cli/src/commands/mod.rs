@@ -1,19 +1,19 @@
 //! CLI subcommands.
 
-pub mod add;
-pub mod ask;
-pub mod clear;
-pub mod config;
-pub mod consolidate;
-pub mod count;
-pub mod data;
-pub mod delete;
-pub mod get;
-pub mod history;
-pub mod init;
-pub mod list;
-pub mod search;
-pub mod update;
+pub(crate) mod add;
+pub(crate) mod ask;
+pub(crate) mod clear;
+pub(crate) mod config;
+pub(crate) mod consolidate;
+pub(crate) mod count;
+pub(crate) mod data;
+pub(crate) mod delete;
+pub(crate) mod get;
+pub(crate) mod history;
+pub(crate) mod init;
+pub(crate) mod list;
+pub(crate) mod search;
+pub(crate) mod update;
 
 use std::path::PathBuf;
 
@@ -24,11 +24,11 @@ use crate::config_loader;
 
 /// Global options shared across all subcommands.
 #[derive(Debug)]
-pub struct Context {
+pub(crate) struct Context {
     /// Namespace for memory isolation.
-    pub namespace: Option<String>,
+    pub(crate) namespace: Option<String>,
     /// Custom config file path.
-    pub config_path: Option<PathBuf>,
+    pub(crate) config_path: Option<PathBuf>,
 }
 
 impl Context {
@@ -36,7 +36,7 @@ impl Context {
     ///
     /// Loads config from `--config` path or `~/.meme/config.toml`, applies
     /// environment variable overrides, then constructs the `Meme` instance.
-    pub async fn build_meme(&self) -> anyhow::Result<Meme> {
+    pub(crate) async fn build_meme(&self) -> anyhow::Result<Meme> {
         let config = match &self.config_path {
             Some(path) => config_loader::from_file(path)?,
             None => config_loader::load_default(),
@@ -50,12 +50,12 @@ impl Context {
 }
 
 /// Parse a UUID string, returning a user-friendly error on failure.
-pub fn parse_uuid(s: &str) -> anyhow::Result<Uuid> {
+pub(crate) fn parse_uuid(s: &str) -> anyhow::Result<Uuid> {
     Uuid::parse_str(s).map_err(|e| anyhow::anyhow!("invalid UUID '{s}': {e}"))
 }
 
 /// UTF-8 safe string truncation for display.
-pub fn truncate_str(s: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_str(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_owned()
     } else {

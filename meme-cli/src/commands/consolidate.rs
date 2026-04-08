@@ -7,7 +7,7 @@ use super::Context;
 
 /// Consolidate memories: decay old entries, merge near-duplicates, prune low-importance.
 #[derive(Debug, Args)]
-pub struct ConsolidateCmd {
+pub(crate) struct ConsolidateCmd {
     /// Maximum age in days before decay applies.
     #[arg(long, default_value_t = 90)]
     pub max_age_days: u32,
@@ -31,8 +31,11 @@ impl ConsolidateCmd {
     /// # Errors
     ///
     /// Returns an error if consolidation fails.
-    #[allow(clippy::print_stdout)]
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    #[allow(
+        clippy::print_stdout,
+        reason = "CLI command prints consolidation stats to stdout"
+    )]
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let meme = ctx.build_meme().await?;
         let params = ConsolidationParams {
             max_age_days: self.max_age_days,

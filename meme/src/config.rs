@@ -45,7 +45,9 @@ impl Config {
             return Err(MemeError::Config("embedding dimension must be > 0".into()));
         }
         if self.llm.max_retries == 0 || self.llm.max_retries > 10 {
-            return Err(MemeError::Config("max_retries must be between 1 and 10".into()));
+            return Err(MemeError::Config(
+                "max_retries must be between 1 and 10".into(),
+            ));
         }
         if self.pipeline.semantic_top_k == 0 {
             return Err(MemeError::Config("semantic_top_k must be > 0".into()));
@@ -57,7 +59,9 @@ impl Config {
             return Err(MemeError::Config("max_build_workers must be > 0".into()));
         }
         if self.pipeline.max_retrieval_workers == 0 {
-            return Err(MemeError::Config("max_retrieval_workers must be > 0".into()));
+            return Err(MemeError::Config(
+                "max_retrieval_workers must be > 0".into(),
+            ));
         }
         Ok(())
     }

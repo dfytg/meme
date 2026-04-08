@@ -17,6 +17,7 @@ use crate::error::{MemeError, Result};
 /// Wraps an ONNX cross-encoder model that scores `(query, document)` pairs.
 /// Thread-safe via `Arc<Mutex<_>>` and async-safe via `spawn_blocking`.
 pub(crate) struct OnnxReranker {
+    /// Thread-safe handle to the ONNX reranker model.
     model: Arc<Mutex<fastembed::TextRerank>>,
 }
 
@@ -72,15 +73,16 @@ impl OnnxReranker {
         let n = top_n.min(docs.len());
 
         tokio::task::spawn_blocking(move || {
-            let mut guard = model
-                .lock()
-                .map_err(|e| MemeError::Internal(format!("reranker lock poisoned: {e}")))?;
             let doc_refs: Vec<&str> = docs.iter().map(String::as_str).collect();
-            let results = guard
-                .rerank(query.as_str(), doc_refs.as_slice(), false, None)
-                .map_err(|e| MemeError::Internal(format!("reranker inference failed: {e}")))?;
+            let results = {
+                let mut guard = model
+                    .lock()
+                    .map_err(|e| MemeError::Internal(format!("reranker lock poisoned: {e}")))?;
+                guard
+                    .rerank(query.as_str(), doc_refs.as_slice(), false, None)
+                    .map_err(|e| MemeError::Internal(format!("reranker inference failed: {e}")))?
+            };
 
-            // Results are already sorted by score descending.
             Ok(results.into_iter().take(n).map(|r| r.index).collect())
         })
         .await
@@ -88,6 +90,7 @@ impl OnnxReranker {
     }
 }
 
+/// Resolve a model code string to a [`fastembed::RerankerModel`].
 fn resolve_model(name: &str) -> Result<fastembed::RerankerModel> {
     for info in fastembed::TextRerank::list_supported_models() {
         if info.model_code == name {

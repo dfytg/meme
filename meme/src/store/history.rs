@@ -15,6 +15,7 @@ use crate::model::{Event, EventType};
 
 /// Persistent store for memory lifecycle events backed by `SQLite`.
 pub struct HistoryStore {
+    /// Shared `SQLite` connection (behind a mutex for thread safety).
     conn: Arc<Mutex<Connection>>,
 }
 
@@ -136,11 +137,8 @@ impl HistoryStore {
     }
 }
 
-fn fetch_raw_events(
-    conn: &Connection,
-    mid: &str,
-    ns: Option<&str>,
-) -> Result<Vec<RawEvent>> {
+/// Query raw event rows from `SQLite` for a given memory id.
+fn fetch_raw_events(conn: &Connection, mid: &str, ns: Option<&str>) -> Result<Vec<RawEvent>> {
     let mut stmt = conn.prepare(
         "SELECT event_id, memory_id, event_type, old_content, new_content, created_at
          FROM events
@@ -163,15 +161,22 @@ fn fetch_raw_events(
 
 /// Intermediate row type for `SQLite` → `Event` conversion.
 struct RawEvent {
+    /// UUID of the event itself.
     event_id: String,
+    /// UUID of the associated memory.
     memory_id: String,
+    /// Event type string ("add", "update", "delete").
     event_type: String,
+    /// Previous content (for updates and deletes).
     old_content: Option<String>,
+    /// New content (for adds and updates).
     new_content: Option<String>,
+    /// ISO-8601 creation timestamp.
     created_at: String,
 }
 
 impl RawEvent {
+    /// Convert this raw row into a typed [`Event`].
     fn try_into_event(self) -> Result<Event> {
         Ok(Event {
             id: Uuid::parse_str(&self.event_id).map_err(|e| {

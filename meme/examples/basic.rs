@@ -4,15 +4,37 @@
 //! MEME_LLM_API_KEY=sk-... cargo run --example basic
 //! ```
 
-#[allow(clippy::print_stdout)]
+use arrow_array as _;
+use arrow_schema as _;
+use chrono as _;
+use fastembed as _;
+use futures as _;
+use lancedb as _;
+use regex as _;
+use reqwest as _;
+use rusqlite as _;
+use serde as _;
+use serde_json as _;
+use thiserror as _;
+use toml as _;
+use tracing as _;
+use uuid as _;
+
+#[allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "example prints output to stdout/stderr"
+)]
 #[tokio::main]
 async fn main() -> meme::error::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter("meme=info")
         .init();
 
-    let api_key = std::env::var("MEME_LLM_API_KEY")
-        .expect("set MEME_LLM_API_KEY env var to run this example");
+    let Ok(api_key) = std::env::var("MEME_LLM_API_KEY") else {
+        eprintln!("set MEME_LLM_API_KEY env var to run this example");
+        return Ok(());
+    };
 
     let meme = meme::Meme::builder()
         .api_key(api_key)

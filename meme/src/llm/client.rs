@@ -70,10 +70,15 @@ impl Default for ChatOptions {
 /// OpenAI-compatible HTTP LLM client.
 #[derive(Debug, Clone)]
 pub(crate) struct LlmClient {
+    /// Shared HTTP client.
     http: reqwest::Client,
+    /// API base URL.
     base_url: String,
+    /// Bearer token.
     api_key: String,
+    /// Model identifier.
     model: String,
+    /// Maximum retry attempts on transient errors.
     max_retries: u32,
 }
 
@@ -144,6 +149,7 @@ impl LlmClient {
         Err(last_err.unwrap_or_else(|| MemeError::llm("all retries exhausted")))
     }
 
+    /// Execute a single chat completion API request.
     async fn call_api(&self, messages: &[Message], opts: &ChatOptions) -> Result<String> {
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -154,7 +160,9 @@ impl LlmClient {
             "stream": false,
         });
 
-        if opts.json_mode && let Some(obj) = body.as_object_mut() {
+        if opts.json_mode
+            && let Some(obj) = body.as_object_mut()
+        {
             obj.insert(
                 "response_format".to_owned(),
                 serde_json::json!({"type": "json_object"}),

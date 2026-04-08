@@ -7,7 +7,7 @@ use super::Context;
 
 /// Search memories by semantic similarity.
 #[derive(Debug, Args)]
-pub struct SearchCmd {
+pub(crate) struct SearchCmd {
     /// Search query text.
     pub query: String,
 
@@ -26,7 +26,7 @@ impl SearchCmd {
     /// # Errors
     ///
     /// Returns an error if the search fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let meme = ctx.build_meme().await?;
 
         let entries = meme.search(&self.query).await?;

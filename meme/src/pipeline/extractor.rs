@@ -15,14 +15,23 @@ use crate::model::{Dialogue, Memory};
 /// Dialogue-to-memory extractor implementing Stage 1 (Semantic Structured Compression)
 /// of the pipeline.
 pub(crate) struct Extractor {
+    /// LLM client for extraction calls.
     llm: Arc<LlmClient>,
+    /// Number of dialogue turns per extraction window.
     window_size: usize,
+    /// Overlap between consecutive windows.
     overlap_size: usize,
+    /// Step size (`window_size` − `overlap_size`).
     step_size: usize,
+    /// Maximum parallel extraction workers.
     max_parallel_workers: usize,
+    /// Optional custom extraction prompt override.
     custom_extraction_prompt: Option<String>,
+    /// Buffered dialogue turns awaiting processing.
     dialogue_buffer: Vec<Dialogue>,
+    /// Number of dialogue turns processed so far.
     processed_count: usize,
+    /// Entries from the most recent extraction (context for next window).
     previous_entries: Vec<Memory>,
 }
 
@@ -105,6 +114,7 @@ impl Extractor {
         Ok(entries)
     }
 
+    /// Extract memories from the current dialogue window.
     async fn process_window(&mut self) -> Result<Vec<Memory>> {
         if self.dialogue_buffer.is_empty() {
             return Ok(Vec::new());
@@ -129,6 +139,7 @@ impl Extractor {
         Ok(entries)
     }
 
+    /// Process dialogues in parallel when the buffer exceeds one window.
     async fn add_dialogues_parallel(&mut self, dialogues: Vec<Dialogue>) -> Result<Vec<Memory>> {
         self.dialogue_buffer.extend(dialogues);
         let total_dialogues = self.dialogue_buffer.len();
@@ -136,7 +147,11 @@ impl Extractor {
         let mut windows = Vec::new();
         let mut pos = 0;
         while pos + self.window_size <= self.dialogue_buffer.len() {
-            let window = self.dialogue_buffer.get(pos..pos + self.window_size).unwrap_or_default().to_vec();
+            let window = self
+                .dialogue_buffer
+                .get(pos..pos + self.window_size)
+                .unwrap_or_default()
+                .to_vec();
             windows.push(window);
             pos += self.step_size;
         }
@@ -200,12 +215,16 @@ impl Extractor {
 
         self.processed_count += total_dialogues;
         if !all_entries.is_empty() {
-            self.previous_entries = all_entries.get(all_entries.len().saturating_sub(10)..).unwrap_or_default().to_vec();
+            self.previous_entries = all_entries
+                .get(all_entries.len().saturating_sub(10)..)
+                .unwrap_or_default()
+                .to_vec();
         }
 
         Ok(all_entries)
     }
 
+    /// Delegate to [`generate_entries_standalone`] with current context.
     async fn generate_entries(&self, dialogues: &[Dialogue]) -> Result<Vec<Memory>> {
         let context = prompt::extraction_context(&self.previous_entries);
         generate_entries_standalone(
@@ -218,6 +237,7 @@ impl Extractor {
     }
 }
 
+/// Call the LLM to extract structured memory entries from dialogues.
 async fn generate_entries_standalone(
     llm: &Arc<LlmClient>,
     dialogues: &[Dialogue],

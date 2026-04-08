@@ -7,7 +7,7 @@ use super::Context;
 
 /// List stored memory entries.
 #[derive(Debug, Args)]
-pub struct ListCmd {
+pub(crate) struct ListCmd {
     /// Maximum number of entries to show.
     #[arg(short, long, default_value_t = 20)]
     pub limit: usize,
@@ -23,7 +23,7 @@ impl ListCmd {
     /// # Errors
     ///
     /// Returns an error if the query fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let meme = ctx.build_meme().await?;
 
         let entries = meme.list().await?;

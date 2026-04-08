@@ -7,7 +7,7 @@ use crate::config_loader;
 
 /// Show the effective configuration.
 #[derive(Debug, Args)]
-pub struct ConfigCmd;
+pub(crate) struct ConfigCmd;
 
 impl ConfigCmd {
     /// Execute the config command.
@@ -15,8 +15,11 @@ impl ConfigCmd {
     /// # Errors
     ///
     /// Returns an error if serialization fails.
-    #[allow(clippy::unused_self)]
-    pub fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    #[allow(
+        clippy::unused_self,
+        reason = "consistent run(&self, ctx) interface across all commands"
+    )]
+    pub(crate) fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let config = match &ctx.config_path {
             Some(path) => config_loader::from_file(path)?,
             None => config_loader::load_default(),

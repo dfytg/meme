@@ -6,7 +6,7 @@ use super::Context;
 
 /// Count stored memory entries.
 #[derive(Debug, Args)]
-pub struct CountCmd;
+pub(crate) struct CountCmd;
 
 impl CountCmd {
     /// Execute the count command.
@@ -14,7 +14,7 @@ impl CountCmd {
     /// # Errors
     ///
     /// Returns an error if the count operation fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let meme = ctx.build_meme().await?;
         let count = meme.count().await?;
         println!("{count}");

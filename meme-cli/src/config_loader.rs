@@ -11,14 +11,14 @@ use meme::config::Config;
 
 /// Returns the default data directory (`~/.meme/`).
 #[must_use]
-pub fn default_data_dir() -> PathBuf {
+pub(crate) fn default_data_dir() -> PathBuf {
     directories::BaseDirs::new()
         .map_or_else(|| PathBuf::from(".meme"), |d| d.home_dir().join(".meme"))
 }
 
 /// Returns the default config file path (`~/.meme/config.toml`).
 #[must_use]
-pub fn default_config_path() -> PathBuf {
+pub(crate) fn default_config_path() -> PathBuf {
     default_data_dir().join("config.toml")
 }
 
@@ -27,7 +27,7 @@ pub fn default_config_path() -> PathBuf {
 /// # Errors
 ///
 /// Returns an error if the file cannot be read or parsed.
-pub fn from_file(path: &Path) -> anyhow::Result<Config> {
+pub(crate) fn from_file(path: &Path) -> anyhow::Result<Config> {
     let content = std::fs::read_to_string(path)?;
     let mut config: Config = toml::from_str(&content)?;
     apply_env_overrides(&mut config);
@@ -39,7 +39,7 @@ pub fn from_file(path: &Path) -> anyhow::Result<Config> {
 ///
 /// Always applies environment variable overrides on top.
 #[must_use]
-pub fn load_default() -> Config {
+pub(crate) fn load_default() -> Config {
     let path = default_config_path();
     let mut config = if path.exists() {
         match from_file(&path) {
@@ -65,7 +65,7 @@ pub fn load_default() -> Config {
 /// # Errors
 ///
 /// Returns an error if the file cannot be written.
-pub fn save(config: &Config, path: &Path) -> anyhow::Result<()> {
+pub(crate) fn save(config: &Config, path: &Path) -> anyhow::Result<()> {
     let content = toml::to_string_pretty(config)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -75,7 +75,7 @@ pub fn save(config: &Config, path: &Path) -> anyhow::Result<()> {
 }
 
 /// Apply environment variable overrides to a configuration.
-pub fn apply_env_overrides(config: &mut Config) {
+pub(crate) fn apply_env_overrides(config: &mut Config) {
     if let Ok(v) = std::env::var("MEME_LLM_API_KEY") {
         config.llm.api_key = Some(v);
     }

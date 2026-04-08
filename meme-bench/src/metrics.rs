@@ -184,6 +184,7 @@ pub fn aggregate(results: &[QuestionResult]) -> AggregateMetrics {
     }
 }
 
+/// Split text into normalized, lowercased, stopword-filtered tokens.
 fn normalize_tokens(text: &str) -> Vec<String> {
     text.split_whitespace()
         .map(normalize_token)
@@ -191,6 +192,7 @@ fn normalize_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Lowercase and strip punctuation from a single token.
 fn normalize_token(token: &str) -> String {
     token
         .to_lowercase()
@@ -199,10 +201,12 @@ fn normalize_token(token: &str) -> String {
         .collect()
 }
 
+/// Normalize an answer string for comparison.
 fn normalize_answer(text: &str) -> String {
     normalize_tokens(text).join(" ")
 }
 
+/// Check whether a token is a common English stopword.
 fn is_stopword(token: &str) -> bool {
     matches!(
         token,
@@ -277,14 +281,14 @@ mod tests {
 
     #[test]
     fn f1_empty() {
-        let (f1, _, _) = token_f1("", "");
-        assert!((f1 - 1.0).abs() < 1e-9);
+        let (f1_both_empty, _, _) = token_f1("", "");
+        assert!((f1_both_empty - 1.0).abs() < 1e-9);
 
-        let (f1, _, _) = token_f1("", "something");
-        assert!((f1 - 0.0).abs() < 1e-9);
+        let (f1_empty_pred, _, _) = token_f1("", "something");
+        assert!((f1_empty_pred - 0.0).abs() < 1e-9);
 
-        let (f1, _, _) = token_f1("something", "");
-        assert!((f1 - 0.0).abs() < 1e-9);
+        let (f1_empty_gold, _, _) = token_f1("something", "");
+        assert!((f1_empty_gold - 0.0).abs() < 1e-9);
     }
 
     #[test]
@@ -334,10 +338,10 @@ mod tests {
     #[test]
     fn stopwords_filtered() {
         let tokens = normalize_tokens("the cat is on the mat");
-        assert!(!tokens.contains(&"the".to_string()));
-        assert!(!tokens.contains(&"is".to_string()));
-        assert!(!tokens.contains(&"on".to_string()));
-        assert!(tokens.contains(&"cat".to_string()));
-        assert!(tokens.contains(&"mat".to_string()));
+        assert!(!tokens.contains(&"the".to_owned()));
+        assert!(!tokens.contains(&"is".to_owned()));
+        assert!(!tokens.contains(&"on".to_owned()));
+        assert!(tokens.contains(&"cat".to_owned()));
+        assert!(tokens.contains(&"mat".to_owned()));
     }
 }

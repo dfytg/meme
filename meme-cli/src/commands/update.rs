@@ -6,7 +6,7 @@ use super::Context;
 
 /// Update a memory entry's content by UUID.
 #[derive(Debug, Args)]
-pub struct UpdateCmd {
+pub(crate) struct UpdateCmd {
     /// Memory entry UUID.
     pub id: String,
 
@@ -20,7 +20,7 @@ impl UpdateCmd {
     /// # Errors
     ///
     /// Returns an error if the update fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         let uuid = super::parse_uuid(&self.id)?;
         let meme = ctx.build_meme().await?;
         meme.update(uuid, &self.content).await?;

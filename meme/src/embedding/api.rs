@@ -12,11 +12,17 @@ const EMBED_BATCH_SIZE: usize = 128;
 /// Embedding provider that calls a remote OpenAI-compatible API.
 #[derive(Debug, Clone)]
 pub(crate) struct ApiEmbedding {
+    /// Shared HTTP client.
     http: reqwest::Client,
+    /// API base URL.
     base_url: String,
+    /// Bearer token.
     api_key: String,
+    /// Embedding model name.
     model: String,
+    /// Output vector dimension.
     dimension: usize,
+    /// Maximum retry attempts on transient errors.
     max_retries: u32,
 }
 
@@ -118,6 +124,7 @@ impl ApiEmbedding {
             .ok_or_else(|| MemeError::Embedding("empty embedding response for query".to_owned()))
     }
 
+    /// Call the embedding API with exponential-backoff retries.
     async fn embed_with_retry(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
         let mut last_err = None;
         for attempt in 0..self.max_retries {
@@ -138,6 +145,7 @@ impl ApiEmbedding {
             .unwrap_or_else(|| MemeError::Embedding("all embedding retries exhausted".to_owned())))
     }
 
+    /// Execute a single embedding API request.
     async fn call_api(&self, input: &[String]) -> Result<Vec<Vec<f32>>> {
         let url = format!("{}/embeddings", self.base_url);
 
@@ -163,10 +171,9 @@ impl ApiEmbedding {
             )));
         }
 
-        let data: EmbeddingResponse = resp
-            .json()
-            .await
-            .map_err(|e| MemeError::Embedding(format!("failed to parse embedding response: {e}")))?;
+        let data: EmbeddingResponse = resp.json().await.map_err(|e| {
+            MemeError::Embedding(format!("failed to parse embedding response: {e}"))
+        })?;
 
         let mut vectors: Vec<(usize, Vec<f32>)> = data
             .data
@@ -179,13 +186,18 @@ impl ApiEmbedding {
     }
 }
 
+/// API response envelope.
 #[derive(Deserialize)]
 struct EmbeddingResponse {
+    /// Embedding results.
     data: Vec<EmbeddingData>,
 }
 
+/// A single embedding vector returned by the API.
 #[derive(Deserialize)]
 struct EmbeddingData {
+    /// Position in the input batch.
     index: usize,
+    /// The embedding vector.
     embedding: Vec<f32>,
 }

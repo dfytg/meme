@@ -45,9 +45,13 @@ use crate::store::{HistoryStore, VectorStore};
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct MemeBuilder {
+    /// Full configuration, merged from defaults and user overrides.
     config: Config,
+    /// Optional pre-built HTTP client.
     http_client: Option<reqwest::Client>,
+    /// Whether to wipe the database on build.
     clear_db: bool,
+    /// Optional namespace for multi-tenant isolation.
     namespace: Option<String>,
 }
 

@@ -175,6 +175,7 @@ impl ReExtractResponse {
     }
 }
 
+/// Serde default for the reconciliation `action` field.
 fn default_action() -> String {
     "add".to_owned()
 }

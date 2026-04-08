@@ -6,7 +6,7 @@ use super::Context;
 
 /// Clear all stored memories for the current scope.
 #[derive(Debug, Args)]
-pub struct ClearCmd {
+pub(crate) struct ClearCmd {
     /// Skip confirmation prompt.
     #[arg(long)]
     pub force: bool,
@@ -18,7 +18,7 @@ impl ClearCmd {
     /// # Errors
     ///
     /// Returns an error if the clear operation fails.
-    pub async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
+    pub(crate) async fn run(&self, ctx: &Context) -> anyhow::Result<()> {
         if !self.force {
             eprint!("This will delete ALL memories. Are you sure? [y/N] ");
             let mut input = String::new();

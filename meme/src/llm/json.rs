@@ -93,34 +93,50 @@ mod tests {
 
     #[test]
     fn direct_json() {
-        let v = extract_json_from_text(r#"{"key": "value"}"#).unwrap();
-        assert_eq!(v["key"], "value");
+        let obj = extract_json_from_text(r#"{"key": "value"}"#).unwrap();
+        assert_eq!(obj.get("key").and_then(|v| v.as_str()), Some("value"));
 
-        let v = extract_json_from_text(r"[1, 2, 3]").unwrap();
-        assert_eq!(v.as_array().unwrap().len(), 3);
+        let arr = extract_json_from_text(r"[1, 2, 3]").unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 3);
     }
 
     #[test]
     fn fenced_block() {
-        let input = "Here:\n```json\n{\"a\": 1}\n```\nDone.";
-        assert_eq!(extract_json_from_text(input).unwrap()["a"], 1);
+        let tagged = "Here:\n```json\n{\"a\": 1}\n```\nDone.";
+        assert_eq!(
+            extract_json_from_text(tagged)
+                .unwrap()
+                .get("a")
+                .and_then(serde_json::Value::as_i64),
+            Some(1)
+        );
 
-        let input = "Result:\n```\n{\"b\": 2}\n```";
-        assert_eq!(extract_json_from_text(input).unwrap()["b"], 2);
+        let untagged = "Result:\n```\n{\"b\": 2}\n```";
+        assert_eq!(
+            extract_json_from_text(untagged)
+                .unwrap()
+                .get("b")
+                .and_then(serde_json::Value::as_i64),
+            Some(2)
+        );
     }
 
     #[test]
     fn balanced_in_text() {
         let input = r#"The answer is {"name": "Alice", "age": 30} done."#;
         let v = extract_json_from_text(input).unwrap();
-        assert_eq!(v["name"], "Alice");
-        assert_eq!(v["age"], 30);
+        assert_eq!(v.get("name").and_then(|v| v.as_str()), Some("Alice"));
+        assert_eq!(v.get("age").and_then(serde_json::Value::as_i64), Some(30));
     }
 
     #[test]
     fn nested_objects() {
         let v = extract_json_from_text(r#"{"outer": {"inner": [1, 2]}}"#).unwrap();
-        assert_eq!(v["outer"]["inner"].as_array().unwrap().len(), 2);
+        let inner = v
+            .get("outer")
+            .and_then(|o| o.get("inner"))
+            .and_then(|a| a.as_array());
+        assert_eq!(inner.map(Vec::len), Some(2));
     }
 
     #[test]

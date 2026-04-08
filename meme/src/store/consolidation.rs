@@ -86,7 +86,11 @@ pub async fn consolidate(
         async move {
             let _permit = sem.acquire().await;
             store
-                .semantic_search(vectors_ref.get(i).unwrap_or(&Vec::new()), merge_k, namespace)
+                .semantic_search(
+                    vectors_ref.get(i).unwrap_or(&Vec::new()),
+                    merge_k,
+                    namespace,
+                )
                 .await
                 .map(|neighbors| (i, neighbors))
         }
@@ -128,6 +132,7 @@ pub async fn consolidate(
     Ok(stats)
 }
 
+/// Apply time-based decay to importance scores and mark expired entries as dead.
 fn apply_decay(
     entries: &[Memory],
     params: &ConsolidationParams,
@@ -153,6 +158,7 @@ fn apply_decay(
     decayed
 }
 
+/// Merge near-duplicate entries by cosine similarity, keeping the higher-importance one.
 fn merge_similar(
     all_neighbors: &[(usize, Vec<Memory>)],
     entries: &[Memory],
@@ -169,15 +175,21 @@ fn merge_similar(
             continue;
         }
         for neighbor in neighbors {
-            let Some(entry_i) = entries.get(*i) else { continue };
+            let Some(entry_i) = entries.get(*i) else {
+                continue;
+            };
             if neighbor.id == entry_i.id {
                 continue;
             }
-            let Some(&j) = id_to_idx.get(&neighbor.id) else { continue };
+            let Some(&j) = id_to_idx.get(&neighbor.id) else {
+                continue;
+            };
             if dead.contains(&j) {
                 continue;
             }
-            let (Some(vi), Some(vj)) = (vectors.get(*i), vectors.get(j)) else { continue };
+            let (Some(vi), Some(vj)) = (vectors.get(*i), vectors.get(j)) else {
+                continue;
+            };
             let sim = cosine_similarity(vi, vj);
             if sim < threshold {
                 continue;
@@ -199,6 +211,7 @@ fn merge_similar(
     (ids_to_delete, merged)
 }
 
+/// Compute the cosine similarity between two vectors.
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     let dot: f64 = a
         .iter()
