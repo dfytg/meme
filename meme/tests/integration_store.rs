@@ -1,6 +1,9 @@
 //! Integration tests for `LanceDB`-backed `VectorStore`.
 
-#![allow(unused_crate_dependencies, reason = "transitive lib deps are not directly used in tests")]
+#![allow(
+    unused_crate_dependencies,
+    reason = "transitive lib deps are not directly used in tests"
+)]
 
 #[cfg(test)]
 mod tests {

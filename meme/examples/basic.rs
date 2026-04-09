@@ -4,7 +4,10 @@
 //! MEME_LLM_API_KEY=sk-... cargo run --example basic
 //! ```
 
-#![allow(unused_crate_dependencies, reason = "transitive lib deps are not directly used in this example")]
+#![allow(
+    unused_crate_dependencies,
+    reason = "transitive lib deps are not directly used in this example"
+)]
 
 #[allow(
     clippy::print_stdout,
