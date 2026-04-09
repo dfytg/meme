@@ -1,21 +1,6 @@
 //! Integration tests for `LanceDB`-backed `VectorStore`.
 
-use arrow_array as _;
-use arrow_schema as _;
-use chrono as _;
-#[cfg(feature = "onnx")]
-use fastembed as _;
-use futures as _;
-use lancedb as _;
-use regex as _;
-use reqwest as _;
-use rusqlite as _;
-use serde as _;
-use serde_json as _;
-use thiserror as _;
-use toml as _;
-use tracing as _;
-use tracing_subscriber as _;
+#![allow(unused_crate_dependencies, reason = "transitive lib deps are not directly used in tests")]
 
 #[cfg(test)]
 mod tests {
