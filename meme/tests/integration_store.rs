@@ -3,6 +3,7 @@
 use arrow_array as _;
 use arrow_schema as _;
 use chrono as _;
+#[cfg(feature = "onnx")]
 use fastembed as _;
 use futures as _;
 use lancedb as _;
